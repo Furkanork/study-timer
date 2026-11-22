@@ -61,6 +61,12 @@
     arts:   { label: "Theatre", effect: "+25% population; this province never revolts",
               names: ["Amphitheatre", "Cathedral", "Opera House", "Museum", "Arts Centre"],
               icon: "M4 5h16v5a8 8 0 0 1-16 0zM9 9h.01M15 9h.01M9 13a4 4 0 0 0 6 0" },
+    write:  { label: "Chancery", effect: "Peace treaties 15% cheaper and 1 week longer (up to 3)",
+              names: ["Scribes' Hall", "Chancery", "Ministry of Letters", "Press Office", "Communications Office"],
+              icon: "M4 20l4-1 11-11-3-3L5 16zM14 6l3 3" },
+    listen: { label: "Spy network", effect: "Repels 20% of raids here; spies reveal raid targets",
+              names: ["Listening Post", "Spy Network", "Secret Service", "Intelligence Bureau", "Signals Agency"],
+              icon: "M3 12s3-6 9-6 9 6 9 6-3 6-9 6-9-6-9-6zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" },
     learn:  { label: "Library", effect: "+3% subject points from all study (up to +30%)",
               names: ["Library", "Scriptorium", "Academy", "University", "Research Institute"],
               icon: "M4 5h6a2 2 0 0 1 2 2v12a2 2 0 0 0-2-2H4zM20 5h-6a2 2 0 0 0-2 2v12a2 2 0 0 1 2-2h6z" },
@@ -73,11 +79,41 @@
     ["math", "Math & economics", "Mints — the most gold"],
     ["science", "Science & tech", "Laboratories — cheaper technology"],
     ["arts", "History, literature & arts", "Theatres — population, no revolts"],
+    ["write", "Writing & communication", "Chanceries — cheaper, longer peace treaties"],
+    ["listen", "Listening & intelligence", "Spy networks — see and resist raids"],
     ["learn", "Anything else", "Libraries — more subject points"],
   ];
+  // skills inside a subject (e.g. English · Writing) each become their own unit with their own building
+  const skillKind = name => {
+    const n = name.toLowerCase();
+    if (/writ|essay|composit|redac/.test(n)) return "write";
+    if (/listen|hear|audio|écoute|horen|hören/.test(n)) return "listen";
+    if (/read|lecture|lesen|grammar|vocab/.test(n)) return "learn";
+    if (/speak|oral|conversat|pronunc|parl/.test(n)) return "trade";
+    return null;
+  };
+  // subjects plus their skill units, keyed "subjectId~Skill"
+  function SUBJ() {
+    const subs = ST.getSubjects(), out = Object.assign({}, subs);
+    for (const id in subs) {
+      const s = subs[id], sk = s.skills || [];
+      sk.forEach(k => { out[id + "~" + k] = { name: s.name + " · " + k, short: k, color: s.color, target: (s.target || 0) / sk.length, archived: s.archived, parent: id, skill: k }; });
+    }
+    return out;
+  }
+  // what earns points and builds: plain subjects, or the skills of subjects that have them
+  function UNITS() {
+    const all = SUBJ(), out = [];
+    for (const [id, s] of ST.activeSubjects()) {
+      if (s.skills && s.skills.length) s.skills.forEach(k => out.push([id + "~" + k, all[id + "~" + k]]));
+      else out.push([id, s]);
+    }
+    return out;
+  }
   function guessKind(sid, name) {
     const n = (name || sid || "").toLowerCase();
     if (sid === "law" || /law|legal|jur|politic|recht|droit/.test(n)) return "law";
+    if (/literat|histor|philos|poetry|classics/.test(n)) return "arts";
     if (sid === "french" || /french|english|spanish|german|italian|dutch|turkish|arabic|chinese(?! med)|japanese|language|langue|business|marketing|management/.test(n)) return "trade";
     if (sid === "tcm" || /tcm|medic|health|bio|chinese med|anat|nurs|pharm|physio/.test(n)) return "health";
     if (/math|calcul|algebra|statist|econ|financ|account|geometr/.test(n)) return "math";
@@ -86,6 +122,10 @@
     return "learn";
   }
   function kindOf(sid) {
+    if (sid && sid.includes("~")) {
+      const [pid, k] = sid.split("~");
+      return skillKind(k) || kindOf(pid);
+    }
     const s = ST.getSubjects()[sid];
     if (s && s.kind && KINDS[s.kind]) return s.kind;
     return guessKind(sid, s && s.name);
@@ -421,7 +461,18 @@
       const f = +r.f || 0; all += f;
       let s = 0;
       const by = r.by || {};
-      for (const id in by) { if (id === "_none") continue; const v = +by[id] || 0; t[id] = (t[id] || 0) + v; s += v; }
+      for (const id in by) {
+        if (id === "_none") continue;
+        const v = +by[id] || 0; s += v;
+        const subj = ST.getSubjects()[id], sk = (subj && subj.skills) || [];
+        if (!sk.length) { t[id] = (t[id] || 0) + v; continue; }
+        // a subject with skills: tagged time goes to its skill, untagged time is shared between the skills
+        const tagged = ((r.sk || {})[id]) || {};
+        let used = 0;
+        sk.forEach(k => { const x = +tagged[k] || 0; used += x; t[id + "~" + k] = (t[id + "~" + k] || 0) + x; });
+        const rest = Math.max(0, v - used) / sk.length;
+        sk.forEach(k => { t[id + "~" + k] += rest; });
+      }
       t._none = (t._none || 0) + Math.max(0, f - s);
     }
     return { t, all };
@@ -506,13 +557,13 @@
     for (const [sid, s] of subs) {
       const done = weekSecs(w, sid) / 3600;
       if (done >= s.target) { rep.tribute += 20; rep.lines.push({ sid, done, target: s.target, ok: true }); continue; }
-      const n = Math.max(0, Math.min(4, Math.ceil((1 - done / s.target) * 4)) - (tech("police") ? 1 : 0));
+      const n = Math.max(0, Math.min(4, Math.ceil((1 - done / s.target) * 4)) - (tech("police") ? 1 : 0) - (wonderDone("listen") ? 1 : 0));
       const { lost, repelled } = seizeBorder(n, null, w);
       const shielded = repelled.length > 0;
       rep.lines.push({ sid, done, target: s.target, ok: false, lost, shielded, repelled: repelled.map(p => map.P[p].name) });
       const held = repelled.length ? ` · courthouses repelled raiders at ${repelled.map(p => map.P[p].name).join(", ")}` : "";
-      if (lost.length) logEvent(`Week of ${shortDate(w)}: ${ST.getSubjects()[sid].name} target missed (${done.toFixed(1)}/${s.target}h) — lost ${lost.map(l => map.P[l.p].name).join(", ")}${held}`, "raid");
-      else logEvent(`Week of ${shortDate(w)}: ${ST.getSubjects()[sid].name} target missed, but ${shielded ? "your courthouses repelled every raid" : "there was nothing to take"}`, "raid");
+      if (lost.length) logEvent(`Week of ${shortDate(w)}: ${SUBJ()[sid].name} target missed (${done.toFixed(1)}/${s.target}h) — lost ${lost.map(l => map.P[l.p].name).join(", ")}${held}`, "raid");
+      else logEvent(`Week of ${shortDate(w)}: ${SUBJ()[sid].name} target missed, but ${shielded ? "your courthouses repelled every raid" : "there was nothing to take"}`, "raid");
     }
     if (rep.tribute) { st.gold += rep.tribute; logEvent(`Week of ${shortDate(w)}: targets met — +${rep.tribute} gold tribute`, "good"); }
     st.reports.push(rep);
@@ -536,7 +587,7 @@
       cands.sort((a, b) => score(b) - score(a));
       const p = cands[0];
       tried.push(p);
-      if (hasKind(p, "law") && Math.random() < repelChance()) { repelled.push(p); continue; }
+      if ((hasKind(p, "law") && Math.random() < repelChance()) || (hasKind(p, "listen") && Math.random() < .2)) { repelled.push(p); continue; }
       let taker = enemy;
       if (!taker) {
         const tally = {};
@@ -549,14 +600,31 @@
     return { lost, repelled };
   }
 
+  // ---------- spies: with a spy network, see which provinces raiders would hit if the week ended now ----------
+  function spyTargets() {
+    if (!st || !countKind("listen")) return [];
+    const mon = weekOf(todayK());
+    let n = 0;
+    for (const [sid, s] of ST.activeSubjects()) {
+      if (!(s.target > 0)) continue;
+      const done = weekSecs(mon, sid) / 3600;
+      if (done < s.target) n += Math.max(0, Math.min(4, Math.ceil((1 - done / s.target) * 4)) - (tech("police") ? 1 : 0) - (wonderDone("listen") ? 1 : 0));
+    }
+    if (!n) return [];
+    const hostile = r => r > 0 && !atPeace(r);
+    const c = ownedList().filter(p => p !== st.capital && map.P[p].nb.some(nb => hostile(st.owner[nb]) || st.owner[nb] === -1));
+    c.sort((a, b) => map.P[b].nb.filter(nb => hostile(st.owner[nb])).length - map.P[a].nb.filter(nb => hostile(st.owner[nb])).length || a - b);
+    return c.slice(0, n);
+  }
+
   // ---------- diplomacy: French (trade) points buy peace treaties ----------
   const TREATY_WEEKS = 4;
-  const treatyWeeks = () => tech("telegraph") ? 6 : TREATY_WEEKS;
+  const treatyWeeks = () => (tech("telegraph") ? 6 : TREATY_WEEKS) + Math.min(3, countKind("write")) + (wonderDone("write") ? 2 : 0);
   const atPeace = (r, day) => !!(st.treaties && st.treaties[r] && st.treaties[r] > (day || todayK()));
   const activeTreaties = () => Object.keys(st.treaties || {}).filter(r => atPeace(+r)).length;
-  const treatyCost = () => 150 + 50 * activeTreaties();
+  const treatyCost = () => Math.round((150 + 50 * activeTreaties()) * (1 - Math.min(.45, countKind("write") * .15)));
   function tradeSubject() {
-    const t = ST.activeSubjects().filter(([id]) => kindOf(id) === "trade");
+    const t = UNITS().filter(([id]) => kindOf(id) === "trade" || kindOf(id) === "write");
     t.sort((a, b) => (st.pts[b[0]] || 0) - (st.pts[a[0]] || 0));
     return t[0] ? t[0][0] : null;
   }
@@ -597,7 +665,7 @@
   const tech = id => !!(st && st.techs && st.techs[id]);
   // the subject that pays for a kind of cost (the one with most points); none → pay double in gold
   function payer(kind) {
-    const t = ST.activeSubjects().filter(([id]) => kindOf(id) === kind).sort((a, b) => (st.pts[b[0]] || 0) - (st.pts[a[0]] || 0));
+    const t = UNITS().filter(([id]) => kindOf(id) === kind).sort((a, b) => (st.pts[b[0]] || 0) - (st.pts[a[0]] || 0));
     return t[0] ? t[0][0] : null;
   }
   // science subjects pay for gold-priced discoveries with their own points; laboratories make everything cheaper
@@ -609,7 +677,7 @@
   }
   const canPay = pr => pr.gold ? st.gold >= pr.gold : (st.pts[pr.sid] || 0) >= pr.n;
   const pay = pr => { if (pr.gold) st.gold -= pr.gold; else st.pts[pr.sid] -= pr.n; };
-  const priceLabel = pr => pr.gold ? `${COIN}${pr.gold}` : `${pr.n} ${esc((ST.getSubjects()[pr.sid] || {}).name || "")}`;
+  const priceLabel = pr => pr.gold ? `${COIN}${pr.gold}` : `${pr.n} ${esc((SUBJ()[pr.sid] || {}).name || "")}`;
   function research(id) {
     const T = TECHS.find(t => t.id === id); if (!T || tech(id) || T.era > eraIdx()) return;
     const pr = priceOf(T.cost); if (!canPay(pr)) return;
@@ -626,6 +694,8 @@
     math:   { name: "Royal Mint",          effect: "+20% gold from all study" },
     science:{ name: "Grand Observatory",   effect: "Technologies cost 25% less" },
     arts:   { name: "Great Amphitheatre",  effect: "+15% population everywhere and decree rewards +50%" },
+    write:  { name: "Royal Archive",       effect: "Peace treaties last 2 weeks longer" },
+    listen: { name: "Watchtower Network",  effect: "Raids take one province fewer" },
     learn:  { name: "Great Library",       effect: "+10% subject points from all study" },
   };
   const WONDER_COST = 2400;   // 40 hours of that subject
@@ -668,7 +738,7 @@
     if (!types.length) return null;
     const type = types[Math.floor(rand() * types.length)], E = EVENTS[type];
     let sid = null, goal;
-    if (E.kind) { sid = payer(E.kind); const t = ST.getSubjects()[sid].target || 0; goal = Math.max(2, Math.round(t * .6 * 2) / 2 || 3); }
+    if (E.kind) { sid = payer(E.kind); const t = SUBJ()[sid].target || 0; goal = Math.max(2, Math.round(t * .6 * 2) / 2 || 3); }
     else { const tot = ST.activeSubjects().reduce((s, [, x]) => s + (x.target || 0), 0); goal = Math.max(4, Math.round(tot * .7 * 2) / 2 || 6); }
     let p = -1;
     if (type === "plague") { const c = owned.filter(q => Object.keys(st.bld[q] || {}).length); p = c[Math.floor(rand() * c.length)]; }
@@ -676,7 +746,7 @@
     return { type, sid, goal, p, resolved: false, seen: false };
   }
   function eventText(ev, field) {
-    const sub = ev.sid ? ST.getSubjects()[ev.sid] : null;
+    const sub = ev.sid ? SUBJ()[ev.sid] : null;
     return EVENTS[ev.type][field].replace(/\{p\}/g, ev.p >= 0 ? map.P[ev.p].name : "").replace(/\{g\}/g, ev.goal + "h").replace(/\{s\}/g, sub ? sub.name : "");
   }
   const eventHours = (ev, w) => { let s = 0; for (let i = 0; i < 7; i++) s += daySecs(addDays(w, i), ev.sid); return s / 3600; };
@@ -696,9 +766,9 @@
       if (ev.type === "plague") st.gold += 120;
       if (ev.type === "boom") st.gold += 250;
       if (ev.type === "revolt") { st.gold += 80; if (st.owner[ev.p] === 0 && ev.sid) (st.bld[ev.p] = st.bld[ev.p] || {})[ev.sid] = 1; }
-      if (ev.type === "scholar") for (const [id] of ST.activeSubjects()) st.pts[id] = (st.pts[id] || 0) + 60;
+      if (ev.type === "scholar") for (const [id] of UNITS()) st.pts[id] = (st.pts[id] || 0) + 60;
       if (ev.type === "audit") st.gold += 250;
-      if (ev.type === "invent") for (const [id] of ST.activeSubjects()) if (kindOf(id) === "science") st.pts[id] = (st.pts[id] || 0) + 150;
+      if (ev.type === "invent") for (const [id] of UNITS()) if (kindOf(id) === "science") st.pts[id] = (st.pts[id] || 0) + 150;
     } else {
       if (ev.type === "plague" && st.bld[ev.p]) { const k = Object.keys(st.bld[ev.p]); if (k.length) delete st.bld[ev.p][k[Math.floor(Math.random() * k.length)]]; }
       if (ev.type === "revolt" && st.owner[ev.p] === 0 && ev.p !== st.capital && !hasKind(ev.p, "arts")) st.owner[ev.p] = -1;
@@ -710,7 +780,12 @@
   }
 
   // ---------- daily decrees (built from weekly targets) ----------
-  const daySecs = (day, sid) => { const r = ST.getHistory()[day]; return r ? (sid ? +(r.by || {})[sid] || 0 : +r.f || 0) : 0; };
+  const daySecs = (day, sid) => {
+    const r = ST.getHistory()[day]; if (!r) return 0;
+    if (!sid) return +r.f || 0;
+    if (sid.includes("~")) { const [pid, k] = sid.split("~"); return +(((r.sk || {})[pid] || {})[k]) || 0; }
+    return +(r.by || {})[sid] || 0;
+  };
   function makeDecrees(day) {
     const mon = weekOf(day), idx = Math.round((kd(day) - kd(mon)) / 86400000), left = 7 - idx;
     const items = [];
@@ -758,7 +833,7 @@
     for (const k in st.decrees) if (k < addDays(today, -40)) delete st.decrees[k];
   }
   function decreeText(it) {
-    const s = it.sid ? ST.getSubjects()[it.sid] : null;
+    const s = it.sid ? SUBJ()[it.sid] : null;
     return `${s ? s.name : "Any subject"} ${fmtH(it.secs)}`;
   }
 
@@ -767,7 +842,7 @@
   function updateWars() {
     if (ST.syncReady && !ST.syncReady()) return;
     st.wars = st.wars || {};
-    const today = todayK(), subs = ST.getSubjects();
+    const today = todayK(), subs = SUBJ();
     for (const [sid, s] of ST.activeSubjects()) {
       if (!s.exam || s.exam <= today) continue;
       const key = sid + "@" + s.exam;
@@ -807,7 +882,7 @@
   }
   const warHours = w => { let s = 0; for (let d = w.start; d < w.exam; d = addDays(d, 1)) s += daySecs(d, w.sid); return s / 3600; };
   function resolveWar(w) {
-    const hrs = warHours(w), name = st.rivals[w.enemy - 1].name, sname = (ST.getSubjects()[w.sid] || {}).name || "Subject";
+    const hrs = warHours(w), name = st.rivals[w.enemy - 1].name, sname = (SUBJ()[w.sid] || {}).name || "Subject";
     w.hours = Math.round(hrs * 10) / 10;
     w.resolved = true; w.seen = false;
     w.won = hrs >= w.goal;
@@ -903,7 +978,7 @@
 
   let coinTimer = null;
   function coinToast(g, parts) {
-    const subs = ST.getSubjects();
+    const subs = SUBJ();
     coinEl.innerHTML = `<span class="coin"></span><b>+${Math.round(g)}</b> gold`
       + parts.map(([id, m]) => subs[id] ? ` <i style="background:${subs[id].color}"></i>+${Math.round(m)} ${esc(subs[id].name)}` : "").join("");
     coinEl.classList.add("show");
@@ -1162,9 +1237,21 @@
       });
     }
     if (!showLive) { if (replay) rafId = 0; return; }
+    // spy reports: likely raid targets
+    const spied = spyTargets();
+    if (spied.length) {
+      const t = performance.now() / 1000;
+      ctx.save(); ctx.strokeStyle = "#e0565b"; ctx.lineWidth = 2; ctx.setLineDash([4, 3]);
+      for (const p of spied) {
+        const [x, y] = S(map.P[p].ax, map.P[p].ay);
+        ctx.globalAlpha = .6 + .4 * Math.sin(t * 4);
+        ctx.beginPath(); ctx.arc(x, y, 16 + 2 * Math.sin(t * 4), 0, Math.PI * 2); ctx.stroke();
+      }
+      ctx.restore();
+    }
     // buildings + capital
     const r = clamp(4 + view.s * 3.2, 7, 12);
-    const subs = ST.getSubjects();
+    const subs = SUBJ();
     for (let p = 0; p < map.N; p++) {
       const sids = st.owner[p] === 0 ? Object.keys(st.bld[p] || {}) : [];
       const isCap = p === st.capital;
@@ -1185,7 +1272,7 @@
         ctx.restore();
       });
     }
-    if (sel >= 0) rafId = requestAnimationFrame(draw);
+    if (sel >= 0 || spied.length) rafId = requestAnimationFrame(draw);
   }
   function drawTown(cx, cy, n, ink, fill, era) {
     const w = 5, gap = 1.2, tot = n * w + (n - 1) * gap;
@@ -1302,10 +1389,10 @@
     const hrs = totals().all / 3600;
     $("empSub").innerHTML = `${rankOf(owned.length)} · <span class="era-chip">${ERAS[viewEra()].name}</span>`
       + (next ? ` <span class="era-next" title="Total focus hours unlock the next era">${next.name} in ${Math.max(0, next.hours - hrs).toFixed(1)}h</span>` : "");
-    const subs = ST.activeSubjects();
+    const subs = ST.activeSubjects(), units = UNITS();
     $("empRes").innerHTML =
       `<span class="pill" title="Gold — 1 per focus minute${goldMult() > 1 ? ", +" + Math.round((goldMult() - 1) * 100) + "% from markets" : ""}. Spend it to claim land.">${COIN}<b>${Math.floor(st.gold)}</b></span>`
-      + subs.map(([id, s]) => `<span class="pill" title="${esc(s.name)} points — 1 per minute studied. Builds ${KINDS[kindOf(id)].label.toLowerCase()}s."><i style="background:${s.color}"></i><svg viewBox="0 0 24 24"><path d="${KINDS[kindOf(id)].icon}"/></svg><b>${Math.floor(st.pts[id] || 0)}</b></span>`).join("")
+      + units.map(([id, s]) => `<span class="pill" title="${esc(s.name)} points — 1 per minute studied. Builds ${KINDS[kindOf(id)].label.toLowerCase()}s."><i style="background:${s.color}"></i><svg viewBox="0 0 24 24"><path d="${KINDS[kindOf(id)].icon}"/></svg><b>${Math.floor(st.pts[id] || 0)}</b></span>`).join("")
       + `<span class="pill dim" title="Provinces · population"><b>${owned.length}</b> prov · ${fmtPop(pop)}</span>`
       + courtPills();
     // border watch
@@ -1318,6 +1405,7 @@
           const state = pct >= 1 ? "safe" : pct >= (8 - left) / 7 - .05 ? "ok" : "risk";
           return `<span class="w-item ${state}"><i style="background:${s.color}"></i>${esc(s.name)} <b>${done.toFixed(1)}</b>/${s.target}h<span class="w-bar"><span style="width:${pct * 100}%;background:${s.color}"></span></span></span>`;
         }).join("")
+      + (spyTargets().length ? `<span class="w-spy">Spies report raiders eyeing ${spyTargets().map(p => esc(map.P[p].name)).join(", ")}</span>` : "")
       : `<span class="w-head">No weekly targets yet — set them in Progress → Subjects. Each missed target lets rivals raid your borders.</span>`;
     renderSheet();
     baseDirty = true;
@@ -1328,13 +1416,13 @@
     const sh = $("empSheet");
     if (sel < 0 || !ready) { sh.hidden = true; return; }
     const p = sel, P = map.P[p], o = st.owner[p];
-    const subs = ST.getSubjects(), era = viewEra();
+    const subs = SUBJ(), era = viewEra();
     const ownerName = o === 0 ? esc(st.name) : o > 0 ? esc(st.rivals[o - 1].name) : "Unclaimed wilds";
     let body = "";
     if (o === 0) {
       const blds = Object.keys(st.bld[p] || {});
       body += blds.length ? `<div class="s-blds">${blds.map(sid => { const k = KINDS[kindOf(sid)]; return `<span class="s-b"><i style="background:${subs[sid] ? subs[sid].color : "#999"}"></i>${k.names[era]}<small>${k.effect}</small></span>`; }).join("")}</div>` : "";
-      const opts = ST.activeSubjects().filter(([id]) => !(st.bld[p] || {})[id]);
+      const opts = UNITS().filter(([id]) => !(st.bld[p] || {})[id]);
       body += opts.map(([id, s]) => {
         const k = KINDS[kindOf(id)], c = buildCost(id), have = Math.floor(st.pts[id] || 0);
         return `<button class="s-act" data-build="${esc(id)}" ${have >= c ? "" : "disabled"}>
@@ -1383,7 +1471,7 @@
       const nm = KINDS[kindOf(sid)].names[viewEra()];
       logEvent(`Built a ${nm} in ${map.P[p].name}`, "build");
       save();
-      ST.toast(`${nm} built in ${map.P[p].name}`, ST.getSubjects()[sid] ? ST.getSubjects()[sid].color : "#ddd");
+      ST.toast(`${nm} built in ${map.P[p].name}`, SUBJ()[sid] ? SUBJ()[sid].color : "#ddd");
       refresh();
     }
   });
@@ -1418,7 +1506,7 @@
       out += `<button class="pill court ev${eh >= ev.goal ? " ok" : ""}" data-open="event" title="This week's event — settled at the end of the week">${EVENT_ICO}${esc(eventText(ev, "title"))} <b>${eh.toFixed(1)}</b>/${ev.goal}h${eh >= ev.goal ? " ✓" : ""}</button>`; }
     for (const [key, w] of activeWars()) {
       const hrs = warHours(w), days = Math.round((kd(w.exam) - kd(todayK())) / 86400000);
-      const sub = ST.getSubjects()[w.sid];
+      const sub = SUBJ()[w.sid];
       out += `<button class="pill court war" data-open="war" data-key="${esc(key)}" title="Exam campaign">${SWORDS}vs ${esc(st.rivals[w.enemy - 1].name)} · ${esc(sub ? sub.name : "")} <b>${hrs.toFixed(1)}</b>/${w.goal}h · ${days}d</button>`;
     }
     return out;
@@ -1431,7 +1519,7 @@
     if (!st) { el.hidden = true; return; }
     const D = (st.decrees || {})[todayK()];
     const parts = [];
-    if (D) parts.push(D.items.map(i => { const s = i.sid ? ST.getSubjects()[i.sid] : null;
+    if (D) parts.push(D.items.map(i => { const s = i.sid ? SUBJ()[i.sid] : null;
       return `<span class="${i.done ? "done" : ""}">${i.done ? "✓ " : ""}${esc(s ? s.name : "Any subject")} ${i.done ? fmtH(i.secs) : fmtH(daySecs(todayK(), i.sid)) + "/" + fmtH(i.secs)}</span>`; }).join(" · ") + (streak() ? ` · ${streak()}-day streak` : ""));
     const ev = curEvent();
     if (ev) parts.push(`<span class="ev">${esc(eventText(ev, "title"))}: ${eventHours(ev, weekOf(todayK())).toFixed(1)}/${ev.goal}h</span>`);
@@ -1447,7 +1535,7 @@
   });
   function showDecrees() {
     const D = (st.decrees || {})[todayK()]; if (!D) return;
-    const subs = ST.getSubjects(), s = streak();
+    const subs = SUBJ(), s = streak();
     const week = Array.from({ length: 14 }, (_, i) => addDays(todayK(), i - 13));
     modal(`<h2>Today's decrees</h2>
       <p class="tip">Set each morning from your weekly targets — doing them keeps you on pace, so you're never raided. Each one pays ${25 + 5 * Math.min(10, s)} gold, and every day you complete them all adds +3% to all study gold (up to +30%).</p>
@@ -1460,7 +1548,7 @@
   }
   function showWar(key) {
     const w = (st.wars || {})[key]; if (!w) return;
-    const sub = ST.getSubjects()[w.sid], hrs = warHours(w), days = Math.round((kd(w.exam) - kd(todayK())) / 86400000);
+    const sub = SUBJ()[w.sid], hrs = warHours(w), days = Math.round((kd(w.exam) - kd(todayK())) / 86400000);
     const total = Math.round((kd(w.exam) - kd(w.start)) / 86400000), gone = total - days;
     const pace = w.goal * gone / total;
     modal(`<h2>${SWORDS.replace("<svg", '<svg class="h-ico"')} War with ${esc(st.rivals[w.enemy - 1].name)}</h2>
@@ -1477,7 +1565,7 @@
     const [key, w] = news[0];
     w.seen = true; save();
     if (!w.resolved) { showWar(key); $("empCard").querySelector("h2").innerHTML = `${SWORDS.replace("<svg", '<svg class="h-ico"')} ${esc(st.rivals[w.enemy - 1].name)} declared war!`; return; }
-    const sub = ST.getSubjects()[w.sid];
+    const sub = SUBJ()[w.sid];
     if (w.won) ST.confetti && ST.confetti([st.color, "#f2c94c", "#ffffff"]);
     modal(`<h2>${w.won ? "Victory!" : "Defeat"}</h2>
       <p class="tip">${esc(sub ? sub.name : "")} exam campaign against ${esc(st.rivals[w.enemy - 1].name)}: <b>${w.hours}h</b> of ${w.goal}h.</p>
@@ -1486,7 +1574,7 @@
       <div class="m-actions"><button class="btn go" data-x>Onwards</button></div>`, e => { if (e.target.closest("[data-x]")) { closeModal(); showWarNews(); } });
   }
   function showDiplomacy() {
-    const sid = tradeSubject(), c = treatyCost(), have = sid ? Math.floor(st.pts[sid] || 0) : 0, sname = sid ? ST.getSubjects()[sid].name : "";
+    const sid = tradeSubject(), c = treatyCost(), have = sid ? Math.floor(st.pts[sid] || 0) : 0, sname = sid ? SUBJ()[sid].name : "";
     const E = ERAS[viewEra()], cols = rivalColors(E);
     const rows = st.rivals.map((R, i) => {
       const r = i + 1;
@@ -1498,7 +1586,7 @@
       return `<div class="dip"><i style="background:${cols[i]}"></i><span>${esc(R.name)}<small>${size} provinces${border ? " · borders you" : ""}</small></span>${status}</div>`;
     }).join("");
     modal(`${realmTabs("dip")}
-      <p class="tip">${sid ? `Spend ${esc(sname)} points on ${TREATY_WEEKS}-week peace treaties. A nation at peace won't raid you when you miss a target, but you can't conquer its land either. Each extra active treaty costs 50 more. You have <b>${have}</b> ${esc(sname)} points.`
+      <p class="tip">${sid ? `Spend ${esc(sname)} points on ${treatyWeeks()}-week peace treaties. A nation at peace won't raid you when you miss a target, but you can't conquer its land either. Each extra active treaty costs 50 more. You have <b>${have}</b> ${esc(sname)} points.`
         : "Add a language subject (like French) to unlock diplomacy."} Exam wars cancel treaties with the enemy.</p>
       <div class="dips">${rows}</div>
       <div class="m-actions"><button class="btn go" data-x>Close</button></div>`, e => {
@@ -1520,7 +1608,7 @@
   function showWonders() {
     const rows = Object.keys(WONDERS).map(kind => {
       const W = WONDERS[kind], sid = payer(kind), inv = (st.wonders || {})[kind] || 0, done = inv >= WONDER_COST;
-      const sub = sid ? ST.getSubjects()[sid] : null, have = sid ? Math.floor(st.pts[sid] || 0) : 0;
+      const sub = sid ? SUBJ()[sid] : null, have = sid ? Math.floor(st.pts[sid] || 0) : 0;
       if (!sid && !done) return "";
       return `<div class="wonder ${done ? "done" : ""}"><div class="w-top"><span><b>${W.name}</b><small>${W.effect}</small></span>${done ? `<em class="good">Complete</em>` : ""}</div>
         ${done ? "" : `<div class="war-bar thin"><span style="width:${inv / WONDER_COST * 100}%;background:${sub.color}"></span></div>
@@ -1566,7 +1654,7 @@
       <ul class="help-list">
         <li><span class="coin"></span><div><b>Study earns gold.</b> Every focus minute = 1 gold (more with markets). Spend gold to claim provinces on your border — wild land is cheapest, rival land costs 50% more, mountains and hills cost extra. Each new province costs a bit more than the last.</div></li>
         <li><i style="background:#56b4e9"></i><div><b>Each subject builds its own thing.</b> Minutes studied in a subject become that subject's points:
-          What a subject builds depends on its <b>role</b>, which you can set per subject in Progress → Subjects: law → <b>courthouses</b> (50% chance to repel raiders), languages & business → <b>markets</b> (+5% gold, pay for treaties), medicine → <b>healers</b> (+50% population), math & economics → <b>mints</b> (+6% gold), physics & science → <b>laboratories</b> (cheaper technology, and science points pay for gold-priced discoveries), history & arts → <b>theatres</b> (+25% population, no revolts), anything else → <b>libraries</b> (+3% subject points).</div></li>
+          What a subject builds depends on its <b>role</b>, which you can set per subject in Progress → Subjects: law → <b>courthouses</b> (50% chance to repel raiders), languages & business → <b>markets</b> (+5% gold, pay for treaties), medicine → <b>healers</b> (+50% population), math & economics → <b>mints</b> (+6% gold), physics & science → <b>laboratories</b> (cheaper technology, and science points pay for gold-priced discoveries), history & arts → <b>theatres</b> (+25% population, no revolts), writing → <b>chanceries</b> (cheaper, longer peace treaties), listening → <b>spy networks</b> (repel 20% of raids, and show which provinces raiders are eyeing), anything else → <b>libraries</b> (+3% subject points). A subject split into skills (e.g. English: Writing, Listening, Reading) gets one building type per skill; reading counts as a library, speaking as a market.</div></li>
         <li><i style="background:#eb8c6a"></i><div><b>Miss a weekly target, get raided.</b> Every Monday each subject's target from last week is checked. Fall short and rival nations seize border provinces — 1 to 4, depending on how short you were. Your capital is always safe; courthouses give a 50% chance to hold. Hit a target and you get 20 gold tribute. Rivals also grab one free province each every week, so claim the wilds before they do.</div></li>
         <li><i style="background:#d9d6d8"></i><div><b>Daily decrees.</b> Each day you get 1–2 tasks based on your weekly targets (e.g. "Law 2h20"). Each fulfilled decree pays gold, and every day you complete them all adds +3% to all study gold, up to +30% for a 10-day streak.</div></li>
         <li><i style="background:#e0565b"></i><div><b>Exam campaigns.</b> Set an exam date for a subject (Progress → Subjects) and 4 weeks before it a rival declares war. Study that subject's weekly target × 4 weeks by exam day to win 3–5 of their provinces and 150 gold. Fall short and they take 3–6 of yours.</div></li>
@@ -1601,7 +1689,7 @@
   function showReports() {
     const reps = st.reports.filter(r => !r.seen);
     if (!reps.length) return;
-    const subs = ST.getSubjects();
+    const subs = SUBJ();
     const anyLost = reps.some(r => r.lines.some(l => l.lost && l.lost.length));
     ensureMap();
     modal(`<h2>${anyLost ? "Your borders were raided" : "Weekly report"}</h2>` + reps.map(r => `<div class="rep"><div class="rep-w">Week of ${shortDate(r.week)}</div>`

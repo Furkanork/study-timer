@@ -371,6 +371,10 @@
   .scard .line3 label { display: flex; align-items: center; gap: 8px; }
   .scard .line3 select { background: rgba(0,0,0,.35); color: var(--text); border: 1px solid var(--line); border-radius: 9px; padding: 6px 8px; font-size: 13px; max-width: 220px; }
   .scard .line3 .rdesc { color: var(--faint); }
+  .scard .line3 .sskills { background: rgba(0,0,0,.35); color: var(--text); border: 1px solid var(--line); border-radius: 9px; padding: 6px 8px; font-size: 13px; width: 260px; max-width: 62vw; }
+  .scard .line3 .qskills { font-size: 12px; padding: 5px 10px; }
+  .skills-line { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 5px; }
+  .skills-line b { color: var(--text); font-weight: 600; }
   .acct { margin-top: 12px; display: flex; flex-direction: column; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); text-align: center; }
   .acct[hidden] { display: none; }
   .acct .g-btn { display: inline-flex; align-items: center; gap: 9px; background: #fff; color: #1f1f1f; border: 0; border-radius: 999px;
@@ -654,6 +658,13 @@
     law:    { name: "Law",    color: PALETTE[1], target: 0, order: 1, archived: false, updated: 1 },
     tcm:    { name: "TCM",    color: PALETTE[2], target: 0, order: 2, archived: false, updated: 1 },
   };
+  // optional skills inside a subject (e.g. English: Writing, Listening, Reading)
+  function cleanSkills(a) {
+    if (!Array.isArray(a)) return [];
+    const out = [];
+    for (const x of a) { const v = String(x).replace(/[.~|/\\[\]*`#$]/g, "").trim().slice(0, 20); if (v && !out.includes(v)) out.push(v); }
+    return out.slice(0, 6);
+  }
   function cleanSubj(s) {
     if (!s || typeof s !== "object") return null;
     return {
@@ -667,6 +678,7 @@
       exam: /^\d{4}-\d\d-\d\d$/.test(s.exam) ? s.exam : "",
       examHours: Math.max(0, Math.min(2000, +s.examHours || 0)),
       kind: typeof s.kind === "string" && /^[a-z]{0,12}$/.test(s.kind) ? s.kind : "",
+      skills: cleanSkills(s.skills),
     };
   }
   let subjects = {};
@@ -698,6 +710,10 @@
   let endAt = null;          // when the countdown ends, while running
   let segStart = null;       // when the current running stretch began
   let segSubj = currentSubj; // subject that stretch is logged to
+  let currentSkill = store.get("skill", "");
+  const skillsOf = id => (subjects[id] && subjects[id].skills) || [];
+  if (!skillsOf(currentSubj).includes(currentSkill)) currentSkill = "";
+  let segSkill = currentSkill;
   let ticker = null, tickCount = 0;
   let pendingNext = null;
   let autoTimer = null;
@@ -780,6 +796,11 @@
       const by = {};
       for (const sid in (r.by || {})) if (r.by[sid] >= 1) by[sid] = Math.round(r.by[sid]);
       days[k] = { f: Math.round(r.f || 0), s: r.s || 0, by };
+      if (r.sk) {
+        const sk = {};
+        for (const sid in r.sk) for (const k2 in r.sk[sid]) if (r.sk[sid][k2] >= 1) (sk[sid] = sk[sid] || {})[k2] = Math.round(r.sk[sid][k2]);
+        if (Object.keys(sk).length) days[k].sk = sk;
+      }
     }
     const body = JSON.stringify(days);
     if (body === lastPushed) return;
@@ -909,6 +930,13 @@
             t.f += m.f; t.s += m.s;
             if (v.by && typeof v.by === "object")
               for (const sid in v.by) if (ID_RE.test(sid)) { const x = Math.max(0, +v.by[sid] || 0); t.by[sid] = (t.by[sid] || 0) + x; m.by[sid] = x; }
+            if (v.sk && typeof v.sk === "object")
+              for (const sid in v.sk) if (ID_RE.test(sid) && v.sk[sid] && typeof v.sk[sid] === "object")
+                for (const k2 in v.sk[sid]) {
+                  const x = Math.max(0, +v.sk[sid][k2] || 0); if (!x) continue;
+                  const ts = (t.sk = t.sk || {})[sid] = (t.sk || {})[sid] || {}; ts[k2] = (ts[k2] || 0) + x;
+                  ((m.sk = m.sk || {})[sid] = m.sk[sid] || {})[k2] = x;
+                }
           }
         });
         others = o;
@@ -1105,9 +1133,11 @@
 
   function renderSubjectSelect() {
     const sel = $("subject");
-    sel.innerHTML = activeSubjects().map(([id, s]) => `<option value="${esc(id)}">${esc(s.name)}</option>`).join("")
+    sel.innerHTML = activeSubjects().map(([id, s]) => s.skills && s.skills.length
+        ? `<optgroup label="${esc(s.name)}">${s.skills.map(k => `<option value="${esc(id)}|${esc(k)}">${esc(s.name)} · ${esc(k)}</option>`).join("")}<option value="${esc(id)}|">${esc(s.name)} · other</option></optgroup>`
+        : `<option value="${esc(id)}">${esc(s.name)}</option>`).join("")
       + `<option value="${NONE}">No subject</option><option value="__log">＋ Log time manually…</option><option value="__edit">＋ Add / edit subjects…</option>`;
-    sel.value = currentSubj;
+    sel.value = skillsOf(currentSubj).length ? currentSubj + "|" + currentSkill : currentSubj;
     sel.style.color = currentSubj === NONE ? "var(--muted)" : "";
     fitSelect();
   }
@@ -1146,18 +1176,25 @@
       const r = rec(today());
       r.f = (+r.f || 0) + secs;
       r.by[segSubj] = (+r.by[segSubj] || 0) + secs;
+      if (segSkill && skillsOf(segSubj).includes(segSkill)) {
+        const sk = r.sk || (r.sk = {}), m = sk[segSubj] || (sk[segSubj] = {});
+        m[segSkill] = (+m[segSkill] || 0) + secs;
+      }
       segStart = null;
       saveHistory();
     }
     segStart = endAt ? Date.now() : null;
     segSubj = currentSubj;
+    segSkill = currentSkill;
   }
 
-  function setSubject(id) {
+  function setSubject(id, skill) {
     if (!validSubj(id)) return;
     if (endAt) accrue();          // log time so far to the old subject
     currentSubj = segSubj = id;
+    currentSkill = segSkill = skill && skillsOf(id).includes(skill) ? skill : "";
     store.set("subject", id);
+    store.set("skill", currentSkill);
     renderMeta();
     render(false);
   }
@@ -1204,6 +1241,7 @@
     endAt = Date.now() + remaining * 1000;
     segStart = Date.now();
     segSubj = currentSubj;
+    segSkill = currentSkill;
     ticker = setInterval(tick, 200);
     setStartBtn(true);
     setStatus(mode === "focus" ? "Focus" : "Break — relax");
@@ -1457,6 +1495,17 @@
     }).join("");
   }
 
+  function daySkill(k, sid, skill) {
+    let s = 0;
+    for (const src of [history, others]) { const r = src[k]; if (r && r.sk && r.sk[sid]) s += +r.sk[sid][skill] || 0; }
+    if (k === today() && sid === segSubj && skill === segSkill) s += liveSecs();
+    return s;
+  }
+  function skillLine(id, days) {
+    const sk = skillsOf(id); if (!sk.length) return "";
+    const parts = sk.map(k => [k, days.reduce((a, d) => a + daySkill(d.key, id, k), 0)]);
+    return `<div class="skills-line">${parts.map(([k, s]) => `<span>${esc(k)} <b>${s >= 60 ? fmtDur(s) : "0m"}</b></span>`).join("")}</div>`;
+  }
   function renderWeek() {
     const days = weekDays(weekOffset);
     const first = days[0].date, last = days[6].date;
@@ -1494,7 +1543,7 @@
         <div class="head"><div class="name"><i class="dot" style="background:${color}"></i><span>${esc(subjName(id))}</span></div>
         <div class="val"><b>${fmtDur(done)}</b>${target ? `<span> / ${fmtH(target / 3600)}</span>` : ""}</div></div>
         ${target ? `<div class="track"><div style="width:${Math.min(100, done / target * 100)}%;background:${color}"></div></div>` : ""}
-        <div class="note ${cls}">${note}</div></div>`;
+        <div class="note ${cls}">${note}</div>${skillLine(id, days)}</div>`;
     }).join("");
     $("weekRows").innerHTML = rows || `<div class="empty">No subjects yet. <button class="btn" data-goto="subjects">Add one</button></div>`;
     $("weekTotal").innerHTML = "<span>Total focused</span><span><b>" + fmtDur(sumDone) + "</b>"
@@ -1558,6 +1607,8 @@
           <label>Exam date<input type="date" class="sexam" value="${s.exam || ""}" min="${today()}"></label>
           <label>Hours before exam<span><input type="number" class="shours" value="${s.examHours || ""}" placeholder="—" min="0" max="2000" step="1" inputmode="numeric"> h</span></label>
         </div>
+        <div class="line3"><label>Skills<input type="text" class="sskills" value="${esc((s.skills || []).join(", "))}" placeholder="optional, e.g. Writing, Listening, Reading" maxlength="130"></label>
+          ${!(s.skills || []).length && window.Empire && window.Empire.guessKind(id, s.name) === "trade" ? `<button class="btn qskills" title="Split this language into skills">Split into Writing · Listening · Reading</button>` : ""}</div>
         ${window.Empire && window.Empire.ROLES ? roleRow(id, s) : ""}
       </div>`).join("") || `<div class="empty">No subjects yet.</div>`;
   }
@@ -1876,7 +1927,7 @@
     const v = e.target.value;
     if (v === "__edit") { e.target.value = currentSubj; openPanel("subjects"); }
     else if (v === "__log") { e.target.value = currentSubj; openPanel("week"); openLog(); }
-    else setSubject(v);
+    else { const [id, sk] = v.split("|"); setSubject(id, sk || ""); }
     e.target.blur();
   });
   $("start").onclick = () => endAt ? pause() : start();
@@ -1928,6 +1979,9 @@
       const i = PALETTE.indexOf(subjects[id].color);
       editSubject(id, { color: PALETTE[(i + 1) % PALETTE.length] });
       e.target.closest(".swatch").style.background = subjects[id].color;
+    } else if (e.target.closest(".qskills")) {
+      editSubject(id, { skills: ["Writing", "Listening", "Reading"] });
+      renderSubjects(); renderMeta();
     } else if (e.target.closest(".sdel")) {
       const b = e.target.closest(".sdel");
       if (!b.classList.contains("confirm")) {
@@ -1952,6 +2006,10 @@
     } else if (e.target.classList.contains("sexam")) {
       const v = e.target.value;
       editSubject(id, { exam: /^\d{4}-\d\d-\d\d$/.test(v) ? v : "" });
+    } else if (e.target.classList.contains("sskills")) {
+      editSubject(id, { skills: cleanSkills(e.target.value.split(",")) });
+      if (!skillsOf(currentSubj).includes(currentSkill)) currentSkill = segSkill = "";
+      renderSubjects(); renderMeta();
     } else if (e.target.classList.contains("skind")) {
       editSubject(id, { kind: e.target.value });
       renderSubjects();
@@ -2042,6 +2100,9 @@
       const t = out[k] || (out[k] = { f: 0, s: 0, by: {} });
       t.f += +r.f || 0; t.s += +r.s || 0;
       for (const sid in (r.by || {})) t.by[sid] = (t.by[sid] || 0) + (+r.by[sid] || 0);
+      for (const sid in (r.sk || {})) for (const k2 in r.sk[sid]) {
+        const ts = (t.sk = t.sk || {})[sid] = (t.sk[sid] || {}); ts[k2] = (ts[k2] || 0) + (+r.sk[sid][k2] || 0);
+      }
     }
     return out;
   }

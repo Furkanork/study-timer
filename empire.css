@@ -220,3 +220,4 @@ body.empire-open { cursor: auto !important; }
 .rp-mid input { width: 100%; accent-color: #f2c94c; }
 .replay-btn { display: inline-flex; align-items: center; gap: 7px; margin-bottom: 12px; }
 .replay-btn svg { width: 14px; height: 14px; fill: currentColor; }
+.w-spy { width: 100%; text-align: center; color: #f19a83; font-weight: 600; }
