@@ -297,3 +297,47 @@
     };
   }
 })();
+
+// ================= "How everything works" guide (timer) =================
+(() => {
+  const ST = window.StudyTimer, $ = id => document.getElementById(id);
+  if (!ST || !$("syncNote")) return;
+  const b = document.createElement("button");
+  b.className = "linkish guide-link"; b.id = "guideBtn"; b.textContent = "How everything works";
+  $("syncNote").before(b);
+  const ov = document.createElement("div"); ov.className = "recap-ov"; ov.id = "guideOv"; ov.hidden = true;
+  ov.innerHTML = `<div class="guide">
+    <h2>How everything works</h2>
+    <h3>The timer</h3>
+    <ul>
+      <li><b>Pick a subject</b> above the clock, then press Start. Focus time is logged to that subject. Subjects with skills (e.g. English) show each skill in the menu — pick one, like <i>English · Writing</i>.</li>
+      <li><b>Focus / Short break / Long break</b> switch automatically after each session; the loop button starts the next one by itself.</li>
+      <li><b>Focus sounds</b> (headphones): rain, ocean or noise, made on your device. By default they only play while the timer runs.</li>
+      <li>While a session runs the controls fade away — move the mouse or tap to bring them back.</li>
+    </ul>
+    <h3>Progress panel (bar-chart button)</h3>
+    <ul>
+      <li><b>This week</b>: hours per subject against your weekly targets, per skill too. <b>Log time manually</b> adds study you did away from the timer.</li>
+      <li><b>History</b> and <b>Notes</b>: past days and the notes you wrote after sessions.</li>
+      <li><b>Subjects</b>: add or remove subjects, set a weekly target, an exam date, skills, and the subject's <b>role in your empire</b>.</li>
+      <li><b>Year</b>: a 12-month heatmap and streaks, a <b>monthly recap card</b> to save or share, and <b>study reminders</b> you add to your phone's calendar.</li>
+    </ul>
+    <h3>Your empire (castle button)</h3>
+    <ul>
+      <li>Every focus minute becomes gold and subject points to grow a kingdom on a map. Weekly targets defend your borders, exam dates start wars, and total hours move you through history. Open it and tap <b>?</b> for the full rules.</li>
+    </ul>
+    <h3>Your data</h3>
+    <ul>
+      <li><b>Sign in</b> (bottom of this panel) with Google or email to have the same hours, subjects, notes and empire on every device.</li>
+      <li>Without signing in, everything stays on this device; <b>Save / Load backup file</b> moves it by hand.</li>
+      <li>Add the page to your home screen to use it like an app; it keeps working offline.</li>
+    </ul>
+    <h3>Keyboard</h3>
+    <p class="keys">Space start/pause · ↑ ↓ ±1 min · S skip · R reset · 1 2 3 modes · H progress · L log time · N notes · E empire · F fullscreen · M mute</p>
+    <div class="yr-row" style="justify-content:flex-end"><button class="btn go" id="guideClose">Got it</button></div>
+  </div>`;
+  document.body.appendChild(ov);
+  b.onclick = () => { ov.hidden = false; };
+  ov.onclick = e => { if (e.target === ov || e.target.id === "guideClose") ov.hidden = true; };
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && !ov.hidden) { ov.hidden = true; e.stopPropagation(); } }, true);
+})();
