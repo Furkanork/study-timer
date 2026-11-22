@@ -26,16 +26,16 @@
     { name: "Antiquity", hours: 0, font: "Cinzel", weight: 700, paper: .5, tint: .72, grain: 14,
       water: "#2c5361", shallow: "#4f8088", neutral: "#cdb98f", ink: "#3a2614", halo: "rgba(240,226,190,.55)", waves: true,
       rivals: ["#b5654a", "#7a8f4e", "#8a6aa3", "#c49a3f", "#4f7f9e", "#a8505f"] },
-    { name: "Medieval", hours: 25, font: "IM Fell English SC", weight: 400, paper: .6, tint: .66, grain: 16,
+    { name: "Medieval", hours: 60, font: "IM Fell English SC", weight: 400, paper: .6, tint: .66, grain: 16,
       water: "#6d8d88", shallow: "#9db4a6", neutral: "#e0cfa5", ink: "#2e1f10", halo: "rgba(245,234,205,.6)", waves: true,
       rivals: ["#a33b32", "#2f5d8a", "#3d7a45", "#c9a227", "#6b3f86", "#b86b2e"] },
-    { name: "Renaissance", hours: 75, font: "Cormorant Garamond", weight: 700, paper: .35, tint: .68, grain: 10,
+    { name: "Renaissance", hours: 250, font: "Cormorant Garamond", weight: 700, paper: .35, tint: .68, grain: 10,
       water: "#3f6f92", shallow: "#6c9bb8", neutral: "#e6dcc0", ink: "#2a1c12", halo: "rgba(250,244,228,.6)", waves: true,
       rivals: ["#b8463f", "#3b6ea8", "#4f9a5a", "#d9a53a", "#8a5bab", "#d07f4c"] },
-    { name: "Industrial", hours: 150, font: "Oswald", weight: 500, paper: .2, tint: .72, grain: 18,
+    { name: "Industrial", hours: 600, font: "Oswald", weight: 500, paper: .2, tint: .72, grain: 18,
       water: "#3a464e", shallow: "#56636a", neutral: "#b9ad96", ink: "#1d1a17", halo: "rgba(225,215,195,.5)", waves: false,
       rivals: ["#8c4a3c", "#4d6273", "#5e7350", "#a68a4a", "#6d5a78", "#8a6b55"] },
-    { name: "Modern", hours: 300, font: "Inter", weight: 800, paper: 0, tint: .9, grain: 5,
+    { name: "Modern", hours: 1200, font: "Inter", weight: 800, paper: 0, tint: .9, grain: 5,
       water: "#0b1721", shallow: "#15293a", neutral: "#3b4047", ink: "#f1f1f1", halo: "rgba(0,0,0,.55)", waves: false,
       rivals: ["#e0565b", "#4c8dde", "#46b97a", "#e8b84a", "#a07ae0", "#e98a4f"] },
   ];
@@ -43,7 +43,7 @@
 
   // ---------- buildings (one type per subject) ----------
   const KINDS = {
-    law:    { label: "Courthouse", effect: "Protects this province from raids",
+    law:    { label: "Courthouse", effect: "50% chance to repel raiders here",
               names: ["Forum", "Royal Court", "Palace of Justice", "Ministry of Law", "Supreme Court"],
               icon: "M12 3v17M7 20h10M4 7h16M7 7l-3 7h6zM17 7l-3 7h6z" },
     trade:  { label: "Market", effect: "+5% gold from all study (up to +50%)",
@@ -327,14 +327,14 @@
   }
   const fmtPop = n => n >= 1e6 ? (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + "M" : Math.round(n / 1000) + "k";
   function claimCost(p) {
-    let c = (30 + 8 * (ownedList().length - 1)) * TERRAIN[map.P[p].t].cost;
+    let c = (40 + 10 * (ownedList().length - 1)) * TERRAIN[map.P[p].t].cost;
     if (st.owner[p] > 0) c *= 1.5;
     return Math.round(c);
   }
   function buildCost(sid) {
     let n = 0;
     for (const p in st.bld) if (st.bld[p][sid]) n++;
-    return 60 + 15 * n;
+    return kindOf(sid) === "law" ? 120 + 30 * n : 60 + 15 * n;
   }
   const isClaimable = p => st.owner[p] !== 0 && map.P[p].nb.some(n => st.owner[n] === 0);
 
@@ -409,33 +409,53 @@
     }
     save();
   }
+  // each week every rival nation takes one free province next to it (same result on every device)
+  function rivalsGrow(w, rep) {
+    const rand = mulberry32(st.seed ^ (kd(w).getTime() / 86400000 | 0));
+    const took = [];
+    st.rivals.forEach((R, i) => {
+      const r = i + 1, opts = [];
+      for (let p = 0; p < map.N; p++) if (st.owner[p] === r) for (const n of map.P[p].nb) if (st.owner[n] === -1 && !opts.includes(n)) opts.push(n);
+      if (!opts.length) return;
+      const p = opts[Math.floor(rand() * opts.length)];
+      st.owner[p] = r;
+      took.push({ p, by: R.name });
+    });
+    if (took.length) {
+      rep.grew = took;
+      logEvent(`Week of ${shortDate(w)}: rival nations expanded into ${took.length} free province${took.length > 1 ? "s" : ""}`, "rival");
+    }
+  }
   function evaluateWeek(w) {
     const subs = ST.activeSubjects().filter(([, s]) => s.target > 0);
-    if (!subs.length) return;
     const rep = { week: w, lines: [], tribute: 0 };
+    rivalsGrow(w, rep);
     for (const [sid, s] of subs) {
       const done = weekSecs(w, sid) / 3600;
       if (done >= s.target) { rep.tribute += 20; rep.lines.push({ sid, done, target: s.target, ok: true }); continue; }
       const n = Math.min(4, Math.ceil((1 - done / s.target) * 4));
-      const lost = [];
+      const lost = [], tried = [], repelled = [];
       for (let i = 0; i < n; i++) {
         const owned = ownedList();
         if (owned.length <= 1) break;
-        const cands = owned.filter(p => p !== st.capital && !hasKind(p, "law") && map.P[p].nb.some(nb => st.owner[nb] !== 0));
+        const cands = owned.filter(p => p !== st.capital && !tried.includes(p) && map.P[p].nb.some(nb => st.owner[nb] !== 0));
         if (!cands.length) break;
         const score = p => map.P[p].nb.filter(nb => st.owner[nb] > 0).length + Math.random() * .9;
         cands.sort((a, b) => score(b) - score(a));
         const p = cands[0];
+        tried.push(p);
+        if (hasKind(p, "law") && Math.random() < .5) { repelled.push(p); continue; }
         const tally = {};
         map.P[p].nb.forEach(nb => { if (st.owner[nb] > 0) tally[st.owner[nb]] = (tally[st.owner[nb]] || 0) + 1; });
         const taker = Object.keys(tally).sort((a, b) => tally[b] - tally[a])[0];
         st.owner[p] = taker ? +taker : -1;
         lost.push({ p, by: taker ? st.rivals[taker - 1].name : "Rebels" });
       }
-      const shielded = !lost.length && ownedList().some(p => hasKind(p, "law"));
-      rep.lines.push({ sid, done, target: s.target, ok: false, lost, shielded });
-      if (lost.length) logEvent(`Week of ${shortDate(w)}: ${ST.getSubjects()[sid].name} target missed (${done.toFixed(1)}/${s.target}h) — lost ${lost.map(l => map.P[l.p].name).join(", ")}`, "raid");
-      else logEvent(`Week of ${shortDate(w)}: ${ST.getSubjects()[sid].name} target missed, but ${shielded ? "your courthouses held the border" : "there was nothing to take"}`, "raid");
+      const shielded = repelled.length > 0;
+      rep.lines.push({ sid, done, target: s.target, ok: false, lost, shielded, repelled: repelled.map(p => map.P[p].name) });
+      const held = repelled.length ? ` · courthouses repelled raiders at ${repelled.map(p => map.P[p].name).join(", ")}` : "";
+      if (lost.length) logEvent(`Week of ${shortDate(w)}: ${ST.getSubjects()[sid].name} target missed (${done.toFixed(1)}/${s.target}h) — lost ${lost.map(l => map.P[l.p].name).join(", ")}${held}`, "raid");
+      else logEvent(`Week of ${shortDate(w)}: ${ST.getSubjects()[sid].name} target missed, but ${shielded ? "your courthouses repelled every raid" : "there was nothing to take"}`, "raid");
     }
     if (rep.tribute) { st.gold += rep.tribute; logEvent(`Week of ${shortDate(w)}: targets met — +${rep.tribute} gold tribute`, "good"); }
     st.reports.push(rep);
@@ -820,7 +840,7 @@
           <em>${c} ${esc(s.name)}${have < c ? ` <u>need ${c - have} more min</u>` : ""}</em></button>`;
       }).join("");
       if (!opts.length && !blds.length) body += `<p class="s-note">Add subjects to unlock buildings.</p>`;
-      body += `<p class="s-note">Population ${fmtPop(provPop(p))}${p === st.capital ? " · Capital — can never be lost" : hasKind(p, "law") ? " · Protected from raids" : ""}</p>`;
+      body += `<p class="s-note">Population ${fmtPop(provPop(p))}${p === st.capital ? " · Capital — can never be lost" : hasKind(p, "law") ? " · Courthouse: 50% chance to repel raiders" : ""}</p>`;
     } else if (isClaimable(p)) {
       const c = claimCost(p);
       body += `<button class="s-act claim" data-claim="${p}" ${st.gold >= c ? "" : "disabled"}>
@@ -876,15 +896,15 @@
       <ul class="help-list">
         <li><span class="coin"></span><div><b>Study earns gold.</b> Every focus minute = 1 gold (more with markets). Spend gold to claim provinces on your border — wild land is cheapest, rival land costs 50% more, mountains and hills cost extra. Each new province costs a bit more than the last.</div></li>
         <li><i style="background:#56b4e9"></i><div><b>Each subject builds its own thing.</b> Minutes studied in a subject become that subject's points:
-          Law builds <b>courthouses</b> (the province can't be raided), French builds <b>markets</b> (+5% gold each), TCM builds <b>healers</b> (+50% population). Other subjects build libraries.</div></li>
-        <li><i style="background:#eb8c6a"></i><div><b>Miss a weekly target, get raided.</b> Every Monday each subject's target from last week is checked. Fall short and rival nations seize border provinces — 1 to 4, depending on how short you were. Your capital and provinces with courthouses are safe. Hit every target and you get gold tribute.</div></li>
-        <li><i style="background:#f2c94c"></i><div><b>Eras.</b> Total focus hours move history forward: Antiquity → Medieval (25h) → Renaissance (75h) → Industrial (150h) → Modern (300h). Each era redraws the map and renames your buildings. You can look back at earlier eras in settings.</div></li>
+          Law builds <b>courthouses</b> (50% chance to repel raiders there; they cost twice as much), French builds <b>markets</b> (+5% gold each), TCM builds <b>healers</b> (+50% population). Other subjects build libraries.</div></li>
+        <li><i style="background:#eb8c6a"></i><div><b>Miss a weekly target, get raided.</b> Every Monday each subject's target from last week is checked. Fall short and rival nations seize border provinces — 1 to 4, depending on how short you were. Your capital is always safe; courthouses give a 50% chance to hold. Hit a target and you get 20 gold tribute. Rivals also grab one free province each every week, so claim the wilds before they do.</div></li>
+        <li><i style="background:#f2c94c"></i><div><b>Eras.</b> Total focus hours move history forward: Antiquity → Medieval (60h) → Renaissance (250h) → Industrial (600h) → Modern (1200h). At ~30h a week that's roughly a year of study. Each era redraws the map and renames your buildings. You can look back at earlier eras in settings.</div></li>
       </ul>
       <p class="tip">Tap a province to see it. Drag to move, pinch or scroll to zoom. The striped provinces are the ones you can claim next.</p>
       <div class="m-actions"><button class="btn go" data-x>Got it</button></div>`, e => { if (e.target.closest("[data-x]")) closeModal(); });
   }
   function showLog() {
-    const icon = { raid: "#eb8c6a", good: "#6fcf97", claim: st.color, build: "#56b4e9", era: "#f2c94c" };
+    const icon = { rival: "#bb86fc", raid: "#eb8c6a", good: "#6fcf97", claim: st.color, build: "#56b4e9", era: "#f2c94c" };
     modal(`<h2>Chronicle</h2><div class="chron">${st.log.length ? st.log.map(l => `<div class="c-row"><i style="background:${icon[l.k] || "#888"}"></i><span>${esc(l.t)}</span><small>${shortDate(l.d)}</small></div>`).join("") : `<p class="tip">Nothing has happened yet. Study, then claim your first province.</p>`}</div>
       <div class="m-actions"><button class="btn" data-x>Close</button></div>`, e => { if (e.target.closest("[data-x]")) closeModal(); });
   }
@@ -909,10 +929,13 @@
     if (!reps.length) return;
     const subs = ST.getSubjects();
     const anyLost = reps.some(r => r.lines.some(l => l.lost && l.lost.length));
+    ensureMap();
     modal(`<h2>${anyLost ? "Your borders were raided" : "Weekly report"}</h2>` + reps.map(r => `<div class="rep"><div class="rep-w">Week of ${shortDate(r.week)}</div>`
       + r.lines.map(l => `<div class="rep-l ${l.ok ? "ok" : "bad"}"><i style="background:${subs[l.sid] ? subs[l.sid].color : "#888"}"></i>
         <span>${esc(subs[l.sid] ? subs[l.sid].name : "Subject")} ${l.done.toFixed(1)}/${l.target}h</span>
-        <small>${l.ok ? "target met" : l.lost && l.lost.length ? "lost " + l.lost.map(x => esc(map.P[x.p].name) + " to " + esc(x.by)).join(", ") : l.shielded ? "courthouses held the border" : "nothing to take"}</small></div>`).join("")
+        <small>${l.ok ? "target met" : (l.lost && l.lost.length ? "lost " + l.lost.map(x => esc(map.P[x.p].name) + " to " + esc(x.by)).join(", ") : l.shielded ? "" : "nothing to take")
+          + (l.repelled && l.repelled.length ? `${l.lost && l.lost.length ? " · " : ""}<span class="saved">courthouse repelled raiders at ${l.repelled.map(esc).join(", ")}</span>` : "")}</small></div>`).join("")
+      + (r.grew && r.grew.length ? `<div class="rep-g">Rivals expanded: ${r.grew.map(x => `${esc(x.by)} took ${esc(map.P[x.p].name)}`).join(" · ")}</div>` : "")
       + (r.tribute ? `<div class="rep-t">${COIN} +${r.tribute} gold tribute</div>` : "") + `</div>`).join("")
       + `<div class="m-actions"><button class="btn go" data-x>${anyLost ? "Rebuild" : "Onwards"}</button></div>`, e => {
         if (e.target.closest("[data-x]")) { reps.forEach(r => { r.seen = true; }); save(); closeModal(); $("empireBtn").classList.remove("alert"); if (st.pendingEra != null) showEraUnlock(); }
