@@ -179,3 +179,30 @@ body.empire-open { cursor: auto !important; }
 .dip .btn { font-size: 12px; padding: 6px 10px; white-space: nowrap; }
 .dip .btn:disabled { opacity: .45; cursor: default; }
 .s-note.war-note { color: #f19a83; }
+
+/* ---- realm: wonders, technology, events ---- */
+.rtabs { display: flex; gap: 4px; background: rgba(255,255,255,.05); border-radius: 12px; padding: 3px; margin-bottom: 12px; }
+.rtabs button { flex: 1; background: none; border: 0; color: #8d8a8c; font: 600 13px inherit; font-family: inherit; padding: 8px 6px; border-radius: 9px; cursor: pointer; }
+.rtabs button.on { background: rgba(255,255,255,.1); color: #f3f1f2; }
+.wonder, .tech { border-top: 1px solid rgba(255,255,255,.06); padding: 11px 0; }
+.w-top, .tech { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.wonder b, .tech b { font-size: 14px; color: #f3f1f2; }
+.wonder small, .tech small { display: block; font-size: 12px; color: #8d8a8c; margin-top: 2px; }
+.wonder.done b { color: #f2c94c; }
+.war-bar.thin { height: 6px; margin: 9px 0 7px; }
+.w-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.w-row .btn, .tech .btn { font-size: 12px; padding: 6px 10px; white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; }
+.w-row .btn:disabled, .tech .btn:disabled { opacity: .45; cursor: default; }
+.t-era { margin-top: 8px; }
+.t-head { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #f2c94c; margin: 8px 0 2px; }
+.t-era.locked { opacity: .5; }
+.t-era.locked .t-head { color: #8d8a8c; }
+.tech.got b { color: #56b4e9; }
+.tech em { display: inline-flex; align-items: center; gap: 4px; }
+.emp .pill.court.ev { border-color: rgba(242,201,76,.5); }
+.emp .pill.court.ev svg { stroke: #f2c94c; }
+.emp-card .h-ico.ev { stroke: #f2c94c; }
+.emp-strip .ev { color: #f2c94c; }
+.rep-e { font-size: 13px; margin-top: 8px; line-height: 1.45; }
+.rep-e.ok { color: #6fcf97; }
+.rep-e.bad { color: #f19a83; }
