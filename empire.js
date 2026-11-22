@@ -232,7 +232,37 @@
     }
     const names = nameGen(mulberry32(seed ^ 0x5bd1e995));
     P.forEach((o, i) => { o.name = names(false); o.nb = [...o.nb]; o.main = comp[i] === main; });
-    return { seed, val, thr, prov, flags, P, N, seaLinks, nameGen: names };
+    // rivers: from high ground, follow the slope down to the sea
+    const rr = mulberry32(seed ^ 0x2545f491), rivers = [], landHigh = [];
+    for (let k = 0; k < 2500; k++) {
+      const x = 20 + Math.floor(rr() * (W - 40)), y = 20 + Math.floor(rr() * (H - 40));
+      if (prov[y * W + x] >= 0) landHigh.push([x, y, val[y * W + x]]);
+    }
+    landHigh.sort((a, b) => b[2] - a[2]);
+    const srcs = [];
+    for (const c of landHigh.slice(0, Math.floor(landHigh.length * .3))) {
+      if (srcs.length >= 14) break;
+      if (srcs.every(s => (s[0] - c[0]) ** 2 + (s[1] - c[1]) ** 2 > 110 * 110) && rr() < .5) srcs.push(c);
+    }
+    for (const [sx, sy] of srcs) {
+      let x = sx, y = sy;
+      const pts = [[x, y]], seen = new Set();
+      for (let step = 0; step < 400; step++) {
+        const cur = val[y * W + x];
+        let best = null, bv = cur + .004;
+        for (let a = 0; a < 12; a++) {
+          const ang = a / 12 * Math.PI * 2, nx = Math.round(x + Math.cos(ang) * 5), ny = Math.round(y + Math.sin(ang) * 5);
+          if (nx < 1 || ny < 1 || nx >= W - 1 || ny >= H - 1 || seen.has(ny * W + nx)) continue;
+          const v = val[ny * W + nx] + (rr() - .5) * .006;
+          if (v < bv) { bv = v; best = [nx, ny]; }
+        }
+        if (!best) break;
+        [x, y] = best; seen.add(y * W + x); pts.push(best);
+        if (val[y * W + x] <= thr) break;
+      }
+      if (pts.length > 18 && val[y * W + x] <= thr) rivers.push(pts);
+    }
+    return { seed, val, thr, prov, flags, P, N, seaLinks, rivers, nameGen: names };
   }
 
   // nations: player start + rival nations, used once when the empire is founded
@@ -284,7 +314,17 @@
   function load() {
     try { const s = JSON.parse(localStorage.getItem(KEY)); return s && s.v === 1 ? s : null; } catch (e) { return null; }
   }
+  const encOwner = o => o.map(v => v < 0 ? "." : String(v)).join("");
+  const decOwner = s => [...s].map(c => c === "." ? -1 : +c);
+  function snapshot() {
+    st.hist = st.hist || [];
+    const o = encOwner(st.owner), last = st.hist[st.hist.length - 1], d = todayK();
+    if (last && last.o === o) return;
+    if (last && last.d === d && st.hist.length > 1) last.o = o; else st.hist.push({ d, o });
+    if (st.hist.length > 400) st.hist = st.hist.filter((x, i) => i % 2 === 0 || i > st.hist.length - 100);
+  }
   function save() {
+    if (st.owner) snapshot();
     st.updated = Date.now();
     const json = JSON.stringify(st);
     try { localStorage.setItem(KEY, json); } catch (e) {}
@@ -846,15 +886,15 @@
   function nationColor(o, E) {
     return o === 0 ? hex(st.color) : o > 0 ? hex(rivalColors(E)[(o - 1) % 6]) : hex(E.neutral);
   }
-  function renderBase() {
+  function renderBase(ownerOverride) {
     const E = ERAS[viewEra()];
     const { val, thr, prov, flags, P } = map;
     const img = bctx.createImageData(W, H), d = img.data;
     const deep = hex(E.water), shallow = hex(E.shallow), ink = hex(E.ink), neutral = hex(E.neutral);
     const paperC = [236, 224, 192];
-    const owner = st.owner;
+    const owner = ownerOverride || st.owner;
     const claim = new Uint8Array(map.N);
-    for (let p = 0; p < map.N; p++) claim[p] = isClaimable(p) ? 1 : 0;
+    if (!ownerOverride) for (let p = 0; p < map.N; p++) claim[p] = isClaimable(p) ? 1 : 0;
     const cols = [];
     for (let p = 0; p < map.N; p++) {
       let c = nationColor(owner[p], E);
@@ -905,6 +945,16 @@
       d[o] = c[0] + g; d[o + 1] = c[1] + g; d[o + 2] = c[2] + g; d[o + 3] = 255;
     }
     bctx.putImageData(img, 0, 0);
+    // rivers
+    bctx.save(); bctx.lineCap = "round"; bctx.lineJoin = "round";
+    for (const r of map.rivers) {
+      for (let i = 1; i < r.length; i++) {
+        const t = i / r.length;
+        bctx.strokeStyle = E.shallow; bctx.globalAlpha = .95; bctx.lineWidth = .8 + t * 2.4;
+        bctx.beginPath(); bctx.moveTo(r[i - 1][0], r[i - 1][1]); bctx.lineTo(r[i][0], r[i][1]); bctx.stroke();
+      }
+    }
+    bctx.restore();
     baseDirty = false;
   }
   function makeSelMask(p) {
@@ -925,10 +975,57 @@
   }
 
   let rafId = 0;
+  let replay = null;   // { i, timer, owner }
+  const dispOwner = () => replay ? replay.owner : st.owner;
+  function startReplay() {
+    closeModal(); select(-1);
+    const H = st.hist || [];
+    if (H.length < 2) { ST.toast("Not enough history yet — come back after a few days of conquest", "#d9d6d8"); return; }
+    replay = { i: 0, owner: decOwner(H[0].o), timer: null };
+    root.classList.add("replaying");
+    let bar = $("empReplay");
+    if (!bar) {
+      bar = document.createElement("div"); bar.id = "empReplay"; bar.className = "emp-replay";
+      bar.innerHTML = `<button class="eb" id="rpPlay"></button><div class="rp-mid"><div class="rp-date" id="rpDate"></div><input type="range" id="rpSlider" min="0" step="1"></div><button class="eb" id="rpClose" title="Exit replay"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`;
+      root.appendChild(bar);
+      $("rpPlay").onclick = () => replay && (replay.timer ? pauseReplay() : playReplay());
+      $("rpClose").onclick = stopReplay;
+      $("rpSlider").oninput = e => { pauseReplay(); showFrame(+e.target.value); };
+    }
+    bar.hidden = false;
+    $("rpSlider").max = H.length - 1;
+    view.fit = Math.min(cv.clientWidth / W, cv.clientHeight / 800);
+    view.s = view.fit; clampView();
+    showFrame(0); playReplay();
+  }
+  function showFrame(i) {
+    const H = st.hist; replay.i = i; replay.owner = decOwner(H[i].o);
+    $("rpSlider").value = i;
+    const n = replay.owner.filter(o => o === 0).length;
+    $("rpDate").textContent = `${shortDate(H[i].d)} ${H[i].d.slice(0, 4)} · ${n} province${n === 1 ? "" : "s"}`;
+    renderBase(replay.owner); redraw();
+  }
+  function playReplay() {
+    if (replay.i >= st.hist.length - 1) showFrame(0);
+    $("rpPlay").innerHTML = `<svg viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg>`;
+    replay.timer = setInterval(() => { if (replay.i >= st.hist.length - 1) pauseReplay(); else showFrame(replay.i + 1); }, Math.max(120, 6000 / st.hist.length));
+  }
+  function pauseReplay() {
+    if (!replay) return;
+    clearInterval(replay.timer); replay.timer = null;
+    $("rpPlay").innerHTML = `<svg viewBox="0 0 24 24"><path d="M7 5l12 7-12 7z"/></svg>`;
+  }
+  function stopReplay() {
+    if (!replay) return;
+    pauseReplay(); replay = null;
+    root.classList.remove("replaying");
+    $("empReplay").hidden = true;
+    baseDirty = true; centerOn(st.capital, cv.clientWidth < 700 ? 2.4 : 1.6); refresh();
+  }
   function draw() {
     rafId = 0;
     if (!ready || !isOpen()) return;
-    if (baseDirty) renderBase();
+    if (baseDirty && !replay) renderBase();
     const dpr = window.devicePixelRatio || 1;
     const cw = cv.clientWidth, ch = cv.clientHeight;
     if (cv.width !== Math.round(cw * dpr) || cv.height !== Math.round(ch * dpr)) { cv.width = Math.round(cw * dpr); cv.height = Math.round(ch * dpr); }
@@ -938,6 +1035,23 @@
     ctx.setTransform(dpr * view.s, 0, 0, dpr * view.s, dpr * view.tx, dpr * view.ty);
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
     ctx.drawImage(base, 0, 0);
+    const showLive = !replay;
+    // roads: a tree from the capital through your provinces
+    if (showLive) {
+      const style = [[[1.5, 4], .55, 1.6], [[5, 4], .6, 1.8], [[], .55, 1.8], [[7, 3], .75, 2], [[], .5, 2.6]][viewEra()];
+      ctx.save(); ctx.setLineDash(style[0]); ctx.strokeStyle = E.name === "Modern" ? "#9aa3ad" : E.ink; ctx.globalAlpha = style[1]; ctx.lineWidth = style[2]; ctx.lineCap = "round";
+      const seenR = new Set([st.capital]), q = [st.capital];
+      ctx.beginPath();
+      while (q.length) {
+        const a = q.shift();
+        for (const b of map.P[a].nb) if (st.owner[b] === 0 && !seenR.has(b) && !map.seaLinks.some(([x, y]) => (x === a && y === b) || (x === b && y === a))) {
+          seenR.add(b); q.push(b);
+          const A = map.P[a], B = map.P[b], mx = (A.ax + B.ax) / 2 + (A.ay - B.ay) * .12, my = (A.ay + B.ay) / 2 + (B.ax - A.ax) * .12;
+          ctx.moveTo(A.ax, A.ay); ctx.quadraticCurveTo(mx, my, B.ax, B.ay);
+        }
+      }
+      ctx.stroke(); ctx.restore();
+    }
     // sea routes to islands
     ctx.save(); ctx.setLineDash([5, 5]); ctx.strokeStyle = E.ink; ctx.globalAlpha = .45; ctx.lineWidth = 1.4;
     for (const [a, b] of map.seaLinks) { ctx.beginPath(); ctx.moveTo(map.P[a].ax, map.P[a].ay); ctx.lineTo(map.P[b].ax, map.P[b].ay); ctx.stroke(); }
@@ -954,7 +1068,7 @@
     // nation labels
     const agg = {};
     for (let p = 0; p < map.N; p++) {
-      const o = st.owner[p]; if (o < 0) continue;
+      const o = dispOwner()[p]; if (o < 0) continue;
       const a = agg[o] || (agg[o] = { x: 0, y: 0, n: 0 });
       const P = map.P[p]; a.x += P.cx * P.n; a.y += P.cy * P.n; a.n += P.n;
     }
@@ -991,6 +1105,25 @@
       }
       ctx.globalAlpha = 1;
     }
+    // towns that grow with population, and rival capitals
+    if (showLive && view.s / view.fit >= 1.5) {
+      const ink = E.name === "Modern" ? "#e8e8e8" : E.ink, fill = E.name === "Modern" ? "#2a2f36" : E.halo.replace(/[\d.]+\)$/, "1)");
+      const base = [1, 1.6, 2.5, 4, 7][eraIdx()] * 1000;
+      for (let p = 0; p < map.N; p++) {
+        if (st.owner[p] !== 0) continue;
+        const [x, y] = S(map.P[p].ax, map.P[p].ay);
+        if (x < -40 || y < -40 || x > cw + 40 || y > ch + 40) continue;
+        const pop = provPop(p) / base;
+        const n = pop >= 24 ? 5 : pop >= 16 ? 4 : pop >= 11 ? 3 : pop >= 7 ? 2 : 1;
+        drawTown(x, y - clamp(4 + view.s * 3.2, 7, 12) - 9, n, ink, fill, viewEra());
+      }
+      st.rivals.forEach((R, i) => {
+        if (st.owner[R.cap] !== i + 1) return;
+        const [x, y] = S(map.P[R.cap].ax, map.P[R.cap].ay);
+        drawCastle(x, y, ink, rivalColors(E)[i]);
+      });
+    }
+    if (!showLive) { if (replay) rafId = 0; return; }
     // buildings + capital
     const r = clamp(4 + view.s * 3.2, 7, 12);
     const subs = ST.getSubjects();
@@ -1015,6 +1148,26 @@
       });
     }
     if (sel >= 0) rafId = requestAnimationFrame(draw);
+  }
+  function drawTown(cx, cy, n, ink, fill, era) {
+    const w = 5, gap = 1.2, tot = n * w + (n - 1) * gap;
+    ctx.save(); ctx.lineWidth = 1; ctx.strokeStyle = ink; ctx.fillStyle = fill;
+    for (let i = 0; i < n; i++) {
+      const x = cx - tot / 2 + i * (w + gap), hgt = era >= 3 ? 5 + ((i * 7 + n) % 3) * 3 : 5 + (i % 2) * 1.5;
+      ctx.beginPath();
+      if (era >= 3) ctx.rect(x, cy - hgt, w, hgt);                      // flat-roofed blocks
+      else { ctx.moveTo(x, cy); ctx.lineTo(x, cy - hgt); ctx.lineTo(x + w / 2, cy - hgt - 3); ctx.lineTo(x + w, cy - hgt); ctx.lineTo(x + w, cy); ctx.closePath(); }
+      ctx.fill(); ctx.stroke();
+    }
+    ctx.restore();
+  }
+  function drawCastle(cx, cy, ink, col) {
+    ctx.save(); ctx.lineWidth = 1.2; ctx.strokeStyle = ink; ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.moveTo(cx - 7, cy + 5); ctx.lineTo(cx - 7, cy - 4); ctx.lineTo(cx - 5, cy - 4); ctx.lineTo(cx - 5, cy - 2); ctx.lineTo(cx - 2, cy - 2);
+    ctx.lineTo(cx - 2, cy - 7); ctx.lineTo(cx + 2, cy - 7); ctx.lineTo(cx + 2, cy - 2); ctx.lineTo(cx + 5, cy - 2); ctx.lineTo(cx + 5, cy - 4);
+    ctx.lineTo(cx + 7, cy - 4); ctx.lineTo(cx + 7, cy + 5); ctx.closePath();
+    ctx.fill(); ctx.stroke(); ctx.restore();
   }
   const redraw = () => { if (!rafId) rafId = requestAnimationFrame(draw); };
 
@@ -1088,6 +1241,7 @@
   window.addEventListener("resize", () => { if (isOpen() && ready) { const f = view.s / view.fit; view.fit = Math.min(cv.clientWidth / W, cv.clientHeight / H); view.s = view.fit * f; clampView(); redraw(); } });
 
   function tapAt(mx, my) {
+    if (replay) return;
     const x = Math.floor(mx), y = Math.floor(my);
     const p = x >= 0 && y >= 0 && x < W && y < H ? map.prov[y * W + x] : -1;
     select(p === sel ? -1 : p);
@@ -1387,8 +1541,8 @@
   }
   function showLog() {
     const icon = { tech: "#56b4e9", war: "#e0565b", peace: "#6fcf97", rival: "#bb86fc", raid: "#eb8c6a", good: "#6fcf97", claim: st.color, build: "#56b4e9", era: "#f2c94c" };
-    modal(`<h2>Chronicle</h2><div class="chron">${st.log.length ? st.log.map(l => `<div class="c-row"><i style="background:${icon[l.k] || "#888"}"></i><span>${esc(l.t)}</span><small>${shortDate(l.d)}</small></div>`).join("") : `<p class="tip">Nothing has happened yet. Study, then claim your first province.</p>`}</div>
-      <div class="m-actions"><button class="btn" data-x>Close</button></div>`, e => { if (e.target.closest("[data-x]")) closeModal(); });
+    modal(`<h2>Chronicle</h2><button class="btn go replay-btn" data-replay><svg viewBox="0 0 24 24"><path d="M7 5l12 7-12 7z"/></svg>Replay your history</button><div class="chron">${st.log.length ? st.log.map(l => `<div class="c-row"><i style="background:${icon[l.k] || "#888"}"></i><span>${esc(l.t)}</span><small>${shortDate(l.d)}</small></div>`).join("") : `<p class="tip">Nothing has happened yet. Study, then claim your first province.</p>`}</div>
+      <div class="m-actions"><button class="btn" data-x>Close</button></div>`, e => { if (e.target.closest("[data-replay]")) startReplay(); else if (e.target.closest("[data-x]")) closeModal(); });
   }
   function showSettings() {
     const unlocked = eraIdx();
@@ -1524,6 +1678,7 @@
     } else { sync(true); clampView(); refresh(); if (st.reports.some(r => !r.seen)) showReports(); }
   }
   function close() {
+    stopReplay();
     root.hidden = true; closeModal(); select(-1);
     document.body.classList.remove("empire-open");
   }
@@ -1536,7 +1691,7 @@
     }
     if (e.target.tagName === "INPUT") { if (e.key === "Escape") e.target.blur(); return; }
     const k = e.key.toLowerCase();
-    if (k === "escape") { if (!$("empModal").hidden) closeModal(); else if (sel >= 0) select(-1); else close(); }
+    if (k === "escape") { if (replay) stopReplay(); else if (!$("empModal").hidden) closeModal(); else if (sel >= 0) select(-1); else close(); }
     else if (k === "e") close();
     else if (k === "+" || k === "=") zoomAt(1.3, cv.clientWidth / 2, cv.clientHeight / 2);
     else if (k === "-") zoomAt(1 / 1.3, cv.clientWidth / 2, cv.clientHeight / 2);

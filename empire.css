@@ -206,3 +206,17 @@ body.empire-open { cursor: auto !important; }
 .rep-e { font-size: 13px; margin-top: 8px; line-height: 1.45; }
 .rep-e.ok { color: #6fcf97; }
 .rep-e.bad { color: #f19a83; }
+
+/* ---- replay ---- */
+.emp.replaying .emp-bottom, .emp.replaying .emp-zoom, .emp.replaying .emp-res { display: none; }
+.emp-replay { position: absolute; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 16px); transform: translateX(-50%); width: min(520px, 94vw);
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 18px; background: rgba(10,10,10,.82);
+  border: 1px solid rgba(255,255,255,.1); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
+.emp-replay[hidden] { display: none; }
+.emp-replay .eb svg { fill: none; }
+#rpPlay svg path { fill: currentColor; }
+.rp-mid { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+.rp-date { font-size: 14px; font-weight: 700; color: #f3f1f2; text-align: center; font-variant-numeric: tabular-nums; }
+.rp-mid input { width: 100%; accent-color: #f2c94c; }
+.replay-btn { display: inline-flex; align-items: center; gap: 7px; margin-bottom: 12px; }
+.replay-btn svg { width: 14px; height: 14px; fill: currentColor; }

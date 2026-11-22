@@ -1,5 +1,5 @@
 // Keeps the timer working offline. Bump VERSION when files change.
-const VERSION = "v7";
+const VERSION = "v8";
 const CACHE = "study-timer-" + VERSION;
 const FILES = ["./", "index.html", "manifest.json", "icon-192.png", "icon-512.png", "apple-touch-icon.png", "empire.js", "empire.css", "firebase-config.js", "firebase-sync.js"];
 
