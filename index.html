@@ -15,7 +15,8 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Cinzel:wght@700&family=IM+Fell+English+SC&family=Cormorant+Garamond:wght@600;700&family=Oswald:wght@500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="empire.css">
 <style>
   :root {
     --bg: #050505;
@@ -458,6 +459,7 @@
       <button class="round txt" id="plus" title="+1 minute (↑)">+1</button>
       <span class="vsep"></span>
       <span class="util">
+        <button class="round" id="empireBtn" title="Your empire (E)"><svg viewBox="0 0 24 24"><path d="M3 21h18M5 21V10l3 2V7l4-4 4 4v5l3-2v11"/><path d="M10 21v-4h4v4"/></svg></button>
         <button class="round" id="progressBtn" title="Weekly progress & history (H)"><svg viewBox="0 0 24 24"><path d="M5 20v-8M12 20V5M19 20v-5"/></svg></button>
         <button class="round toggle" id="auto" title="Automatically start the next focus/break"><svg viewBox="0 0 24 24"><path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg></button>
         <button class="round" id="sound" title="Sound (M)"></button>
@@ -578,7 +580,7 @@
     </div>
   </div>
 
-  <div class="hint">Space start/pause · ↑↓ ±1 min · S skip · R reset · H progress · L log time · N notes · 1/2/3 modes · F fullscreen · M mute</div>
+  <div class="hint">Space start/pause · E empire · ↑↓ ±1 min · S skip · R reset · H progress · L log time · N notes · 1/2/3 modes · F fullscreen · M mute</div>
   <div class="progress"><div id="bar"></div></div>
 
 <script>
@@ -593,7 +595,10 @@
   // ---------- storage (safe if unavailable) ----------
   const store = {
     get(k, d) { try { const v = localStorage.getItem("studyTimer." + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
-    set(k, v) { try { localStorage.setItem("studyTimer." + k, JSON.stringify(v)); } catch (e) {} }
+    set(k, v) {
+      try { localStorage.setItem("studyTimer." + k, JSON.stringify(v)); } catch (e) {}
+      if (k === "history" || k === "subjects") setTimeout(() => window.dispatchEvent(new Event("studytimer:change")), 0);
+    }
   };
 
   // ---------- dates ----------
@@ -1905,6 +1910,7 @@
   $("addSubj").onclick = addSubject;
 
   document.addEventListener("keydown", e => {
+    if (document.body.classList.contains("empire-open")) return;
     if (e.key === "Escape" && !$("panel").hidden) { closePanel(); return; }
     if (e.key === "Escape" && !$("noteCard").hidden) { skipNoteCard(); return; }
     if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT" || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -1972,11 +1978,16 @@
     } catch (err) { bkMsg("That file isn't a Study Timer backup."); }
   });
 
+  // ---------- hooks for the empire (empire.js) ----------
+  window.StudyTimer = { getHistory: () => history, getSubjects: () => subjects, activeSubjects, toast, confetti };
+  $("empireBtn").addEventListener("click", () => window.Empire && window.Empire.open());
+
   // ---------- offline support ----------
   if ("serviceWorker" in navigator && location.protocol === "https:") {
     navigator.serviceWorker.register("sw.js").catch(() => {});
   }
 })();
 </script>
+<script src="empire.js"></script>
 </body>
 </html>
