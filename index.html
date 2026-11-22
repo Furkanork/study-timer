@@ -17,6 +17,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Cinzel:wght@700&family=IM+Fell+English+SC&family=Cormorant+Garamond:wght@600;700&family=Oswald:wght@500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="empire.css">
+<link rel="stylesheet" href="extras.css">
 <style>
   :root {
     --bg: #050505;
@@ -497,6 +498,7 @@
           <button data-tab="history">History</button>
           <button data-tab="notes">Notes</button>
           <button data-tab="subjects">Subjects</button>
+          <button data-tab="year">Year</button>
         </div>
         <button class="round" id="closePanel" title="Close (Esc)"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
       </div>
@@ -580,6 +582,8 @@
         <div id="subjList"></div>
         <button id="addSubj">＋ Add subject</button>
       </section>
+
+      <section id="tab-year" hidden></section>
 
       <div class="sync" id="syncNote"></div>
       <div class="acct" id="acct" hidden></div>
@@ -1404,8 +1408,9 @@
   function renderPanel(soft) {
     store.set("tab", tab);
     document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
-    ["week", "history", "notes", "subjects"].forEach(t => $("tab-" + t).hidden = t !== tab);
-    if (tab === "week") renderWeek();
+    ["week", "history", "notes", "subjects", "year"].forEach(t => $("tab-" + t).hidden = t !== tab);
+    if (tab === "year") { if (window.Extras) window.Extras.renderYear(); }
+    else if (tab === "week") renderWeek();
     else if (tab === "history") renderHistory();
     else if (tab === "notes") renderNotes();
     else if (!soft || !$("subjList").contains(document.activeElement)) renderSubjects();
@@ -2036,6 +2041,7 @@
 })();
 </script>
 <script src="empire.js"></script>
+<script src="extras.js"></script>
 <script src="firebase-config.js"></script>
 <script type="module" src="firebase-sync.js"></script>
 </body>

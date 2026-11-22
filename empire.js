@@ -1707,5 +1707,16 @@
   // load the era fonts early so map labels render in them
   if (document.fonts) ERAS.forEach(e => document.fonts.load(`${e.weight} 16px "${e.font}"`).catch(() => {}));
 
-  window.Empire = { open, close, applyRemote, toggle: () => (isOpen() ? close() : open()), _debug: { map: () => map, view, state: () => st } };
+  // read-only numbers for the monthly recap
+  function summary(from, to) {
+    if (!st) return null;
+    const cnt = o => [...o].filter(c => c === "0").length;
+    const H = st.hist || [];
+    const at = d => { let o = null; for (const x of H) if (x.d <= d) o = x.o; return o; };
+    const a = at(addDays(from, -1)), b = at(to);
+    return { name: st.name, color: st.color, era: ERAS[eraIdx()].name, rank: rankOf(ownedList().length),
+      provinces: b ? cnt(b) : ownedList().length, gained: a && b ? cnt(b) - cnt(a) : null,
+      wars: Object.values(st.wars || {}).filter(w => w.resolved && w.exam >= from && w.exam <= to).map(w => ({ won: w.won, enemy: st.rivals[w.enemy - 1].name })) };
+  }
+  window.Empire = { open, close, applyRemote, summary, toggle: () => (isOpen() ? close() : open()), _debug: { map: () => map, view, state: () => st } };
 })();
