@@ -1,7 +1,7 @@
 // Keeps the timer working offline. Bump VERSION when files change.
-const VERSION = "v2";
+const VERSION = "v3";
 const CACHE = "study-timer-" + VERSION;
-const FILES = ["./", "index.html", "manifest.json", "icon-192.png", "icon-512.png", "apple-touch-icon.png", "empire.js", "empire.css"];
+const FILES = ["./", "index.html", "manifest.json", "icon-192.png", "icon-512.png", "apple-touch-icon.png", "empire.js", "empire.css", "firebase-config.js", "firebase-sync.js"];
 
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));

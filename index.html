@@ -366,6 +366,17 @@
   .sync { margin-top: 16px; font-size: 12px; color: var(--faint); text-align: center; display: flex; align-items: center; justify-content: center; gap: 7px; }
   .sync::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--faint); }
   .sync.ok::before { background: #6fcf97; box-shadow: 0 0 8px #6fcf97; }
+  .acct { margin-top: 12px; display: flex; flex-direction: column; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); text-align: center; }
+  .acct[hidden] { display: none; }
+  .acct .g-btn { display: inline-flex; align-items: center; gap: 9px; background: #fff; color: #1f1f1f; border: 0; border-radius: 999px;
+    padding: 9px 18px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  .acct .g-btn svg { width: 18px; height: 18px; }
+  .acct .linkish { background: none; border: 0; color: var(--muted); text-decoration: underline; cursor: pointer; font-size: 12px; }
+  .acct form { display: flex; flex-direction: column; gap: 6px; width: min(280px, 100%); }
+  .acct input { background: rgba(0,0,0,.35); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font-size: 14px; }
+  .acct .row2 { display: flex; gap: 6px; justify-content: center; }
+  .acct .err { color: #f19a83; font-size: 12px; }
+  .acct b { color: var(--text); font-weight: 600; }
   .backup { margin-top: 10px; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
   .backup-msg { margin-top: 8px; font-size: 12px; color: var(--muted); text-align: center; min-height: 1em; }
 
@@ -571,6 +582,7 @@
       </section>
 
       <div class="sync" id="syncNote"></div>
+      <div class="acct" id="acct" hidden></div>
       <div class="backup">
         <button class="btn" id="bkExport">Save backup file</button>
         <button class="btn" id="bkImport">Load backup file</button>
@@ -838,9 +850,21 @@
     if (push) scheduleSettingsSync(0);
     else lastSetPushed = JSON.stringify(subjects);
   }
+  let othersBy = {};
+  let syncStarted = false, serverSeen = false, empTimer = null, empBody = null;
+  function pushEmpire(json, updated) {
+    empBody = { json, updated };
+    if (!notesCol) return;
+    clearTimeout(empTimer);
+    empTimer = setTimeout(() => {
+      const b = empBody;
+      notesCol.doc("empire").set(b).catch(e => { if (e && e.code === "unavailable") setTimeout(() => pushEmpire(b.json, b.updated), 4000); });
+    }, 800);
+  }
   async function initSync() {
     try {
-      if (!window.claude || typeof window.claude.use !== "function") return;
+      if (syncStarted || !window.claude || typeof window.claude.use !== "function") return;
+      syncStarted = true;
       syncState = "connecting"; renderSyncNote();
       const [db, user] = await Promise.all([window.claude.use("db"), window.claude.use("user")]);
       const uid = db && user ? await user.id() : null;
@@ -850,11 +874,12 @@
       let gotSettings = false;
       const slow = setTimeout(() => { if (syncState === "connecting") { syncState = "slow"; renderSyncNote(); } }, 10000);
       col.onSnapshot(snap => {
-        const o = {}, on = {};
-        let remoteSubjects = null;
+        const o = {}, on = {}, ob = {};
+        let remoteSubjects = null, remoteEmpire = null;
         snap.docs.forEach(d => {
           if (!d.exists) return;
           if (d.id === "settings") { remoteSubjects = (d.data() || {}).subjects || null; return; }
+          if (d.id === "empire") { remoteEmpire = d.data() || null; return; }
           if (d.id.indexOf("notes-") === 0) {
             if (d.id.indexOf("notes-" + deviceId + "-") === 0) return;
             const items = (d.data() || {}).items || {};
@@ -866,24 +891,29 @@
           }
           if (d.id === myId || d.id.indexOf("dev-") !== 0) return;
           const days = (d.data() || {}).days || {};
+          const mine = ob[d.id] = {};
           for (const k in days) {
             const v = days[k];
             if (!isKey(k) || !v || typeof v !== "object") continue;
             const t = o[k] || (o[k] = { f: 0, s: 0, by: {} });
-            t.f += Math.max(0, +v.f || 0);
-            t.s += Math.max(0, +v.s || 0);
+            const m = mine[k] = { f: Math.max(0, +v.f || 0), s: Math.max(0, +v.s || 0), by: {} };
+            t.f += m.f; t.s += m.s;
             if (v.by && typeof v.by === "object")
-              for (const sid in v.by) if (ID_RE.test(sid)) t.by[sid] = (t.by[sid] || 0) + Math.max(0, +v.by[sid] || 0);
+              for (const sid in v.by) if (ID_RE.test(sid)) { const x = Math.max(0, +v.by[sid] || 0); t.by[sid] = (t.by[sid] || 0) + x; m.by[sid] = x; }
           }
         });
         others = o;
+        othersBy = ob;
         otherNotes = on;
+        serverSeen = serverSeen || !snap.metadata.fromCache;
+        if (window.Empire && window.Empire.applyRemote) window.Empire.applyRemote(remoteEmpire, snap.metadata.fromCache);
         if (!snap.metadata.fromCache) {
           clearTimeout(slow); syncState = "synced";
           if (remoteSubjects || !gotSettings) { gotSettings = true; mergeSubjects(remoteSubjects); }
         } else if (remoteSubjects) mergeSubjects(remoteSubjects);
         renderMeta();
         refreshPanel();
+        window.dispatchEvent(new Event("studytimer:change"));
       }, () => { clearTimeout(slow); syncState = "error"; renderSyncNote(); });
       devRef = col.doc(myId);
       settingsRef = col.doc("settings");
@@ -1533,10 +1563,11 @@
   function renderSyncNote() {
     $("syncNote").classList.toggle("ok", syncState === "synced");
     $("syncNote").textContent = {
-      local: "Saved on this device. Use a backup file to move your data to another device.",
-      connecting: "Connecting to your claude.ai account…",
+      local: window.FIREBASE_CONFIG ? "Saved on this device only. Sign in to share your progress across all your devices."
+        : "Saved on this device. Use a backup file to move your data to another device.",
+      connecting: "Connecting to your account…",
       slow: "Can't reach your account right now — showing this device's data. It will sync when it reconnects.",
-      synced: "Synced with your claude.ai account — subjects and hours combine across all your devices using this link.",
+      synced: "Synced — your hours, subjects, notes and empire are the same on every device you sign in on.",
       error: "Sync stopped — showing this device's data. Reopen the page to try again.",
       full: "Your account's storage for this timer is full — new days are saved on this device only.",
     }[syncState] || "";
@@ -1979,7 +2010,23 @@
   });
 
   // ---------- hooks for the empire (empire.js) ----------
-  window.StudyTimer = { getHistory: () => history, getSubjects: () => subjects, activeSubjects, toast, confetti };
+  // history from this device plus your other signed-in devices
+  function combinedHistory() {
+    const out = {};
+    for (const src of [history, others]) for (const k in src) {
+      const r = src[k]; if (!r) continue;
+      const t = out[k] || (out[k] = { f: 0, s: 0, by: {} });
+      t.f += +r.f || 0; t.s += +r.s || 0;
+      for (const sid in (r.by || {})) t.by[sid] = (t.by[sid] || 0) + (+r.by[sid] || 0);
+    }
+    return out;
+  }
+  window.StudyTimer = { getHistory: combinedHistory, getSubjects: () => subjects, activeSubjects, toast, confetti,
+    startSync: initSync, pushEmpire, syncState: () => syncState, serverSeen: () => serverSeen, renderSyncNote,
+    // per-device histories, so devices that haven't loaded yet aren't mistaken for deleted time
+    deviceHistories: () => Object.assign({ ["dev-" + deviceId]: history }, othersBy),
+    // true once we have the full picture (or there's no account sync to wait for)
+    syncReady: () => !window.FIREBASE_CONFIG || serverSeen || (!store.get("signedIn", false) && window.__fbAuth !== "pending") };
   $("empireBtn").addEventListener("click", () => window.Empire && window.Empire.open());
 
   // ---------- offline support ----------
@@ -1989,5 +2036,7 @@
 })();
 </script>
 <script src="empire.js"></script>
+<script src="firebase-config.js"></script>
+<script type="module" src="firebase-sync.js"></script>
 </body>
 </html>

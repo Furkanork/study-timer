@@ -283,7 +283,32 @@
   function load() {
     try { const s = JSON.parse(localStorage.getItem(KEY)); return s && s.v === 1 ? s : null; } catch (e) { return null; }
   }
-  function save() { try { localStorage.setItem(KEY, JSON.stringify(st)); } catch (e) {} }
+  function save() {
+    st.updated = Date.now();
+    const json = JSON.stringify(st);
+    try { localStorage.setItem(KEY, json); } catch (e) {}
+    if (ST.pushEmpire) ST.pushEmpire(json, st.updated);
+  }
+  // newest version wins between devices; only push after hearing from the server so a stale device can't overwrite
+  function applyRemote(r, fromCache) {
+    const ru = r ? +r.updated || 0 : 0, lu = st ? +st.updated || 0 : 0;
+    if (r && ru > lu && typeof r.json === "string") {
+      let s = null;
+      try { s = JSON.parse(r.json); } catch (e) {}
+      if (!s || s.v !== 1) return;
+      const seedChanged = !st || st.seed !== s.seed;
+      st = s;
+      try { localStorage.setItem(KEY, r.json); } catch (e) {}
+      if (seedChanged) { ready = false; sel = -1; selMask = null; map = null; }
+      if (isOpen()) {
+        if (waitingForAccount) { waitingForAccount = false; closeModal(); }
+        if (!ready) { $("empLoading").hidden = false; setTimeout(() => { $("empLoading").hidden = true; start(); }, 30); }
+        else refresh();
+      }
+    } else if (st && lu > ru && !fromCache && ST.pushEmpire) ST.pushEmpire(JSON.stringify(st), st.updated);
+    if (!fromCache && waitingForAccount && !st) { waitingForAccount = false; closeModal(); showFounding(); }
+  }
+  let waitingForAccount = false;
   let map = null;
   function ensureMap() { if (st && (!map || map.seed !== st.seed)) map = generate(st.seed); return map; }
 
@@ -313,9 +338,10 @@
   }
   const isClaimable = p => st.owner[p] !== 0 && map.P[p].nb.some(n => st.owner[n] === 0);
 
-  // totals from the timer's history
-  function totals() {
-    const h = ST.getHistory(), t = {};
+  // totals from the timer's history (all devices combined, or one device's history)
+  function totals(h) {
+    h = h || ST.getHistory();
+    const t = {};
     let all = 0;
     for (const k in h) {
       const r = h[k]; if (!r) continue;
@@ -344,20 +370,27 @@
   }
 
   // turn new study time into gold and subject points
+  // credited time is tracked per device: a device whose data hasn't loaded yet is simply skipped
   function credit(silent) {
-    const { t } = totals();
+    const devs = ST.deviceHistories ? ST.deviceHistories() : { local: ST.getHistory() };
+    const myKey = Object.keys(devs)[0];
+    if (Object.values(st.credited).some(v => typeof v === "number")) st.credited = { [myKey]: st.credited };   // older format
     const mult = goldMult();
-    let g = 0; const parts = [];
-    const ids = new Set([...Object.keys(t), ...Object.keys(st.credited)]);
-    for (const id of ids) {
-      const now = t[id] || 0, was = st.credited[id] || 0, d = now - was;
-      if (Math.abs(d) < 1) continue;
-      st.credited[id] = now;
-      const mins = d / 60;
-      g += d > 0 ? mins * mult : mins;
-      if (id !== "_none") { st.pts[id] = (st.pts[id] || 0) + mins; if (mins >= 1) parts.push([id, mins]); }
+    let g = 0; const gained = {};
+    for (const dev in devs) {
+      const { t } = totals(devs[dev]);
+      const cr = st.credited[dev] || (st.credited[dev] = {});
+      for (const id of new Set([...Object.keys(t), ...Object.keys(cr)])) {
+        const now = t[id] || 0, was = cr[id] || 0, d = now - was;
+        if (Math.abs(d) < 1) continue;
+        cr[id] = now;
+        const mins = d / 60;
+        g += d > 0 ? mins * mult : mins;
+        if (id !== "_none") { st.pts[id] = (st.pts[id] || 0) + mins; gained[id] = (gained[id] || 0) + mins; }
+      }
     }
-    if (!g && !parts.length) return;
+    const parts = Object.entries(gained).filter(([, m]) => m >= 1);
+    if (!g && !Object.keys(gained).length) return;
     st.gold += g;
     save();
     if (!silent && g >= 1) coinToast(g, parts);
@@ -365,6 +398,7 @@
 
   // weekly border check: missed targets → rivals take border provinces
   function processWeeks() {
+    if (ST.syncReady && !ST.syncReady()) return;   // wait until other devices' hours have loaded
     const lastDone = addDays(weekOf(todayK()), -7);
     let w = addDays(st.raidWeek, 7), guard = 0;
     if (w <= lastDone) ensureMap();
@@ -904,6 +938,7 @@
     const suggest = nameGen(mulberry32(seed))(true);
     modal(`<h2>Found your empire</h2>
       <p class="tip">Every focus minute becomes gold to claim land. Each subject raises its own buildings. Miss a weekly target and rivals raid your borders. Your past study time is your starting treasury.</p>
+      ${window.FIREBASE_CONFIG && ST.syncState && ST.syncState() === "local" ? `<p class="tip"><b>Tip:</b> sign in first (Progress panel, bottom) so the same empire is on all your devices.</p>` : ""}
       <label class="f-row">Name<input type="text" id="fName" maxlength="20" value="${esc(suggest)}"></label>
       <div class="f-row">Colour<div class="swatches" id="fColor">${PLAYER_COLORS.map((c, i) => `<button class="sw${i ? "" : " on"}" data-c="${c}" style="background:${c}"></button>`).join("")}</div></div>
       <div class="m-actions"><button class="btn" data-cancel>Not now</button><button class="btn go" data-found>Found empire</button></div>`, e => {
@@ -966,7 +1001,16 @@
     root.hidden = false;
     document.body.classList.add("empire-open");
     $("empireBtn") && $("empireBtn").classList.remove("alert");
-    if (!st) { showFounding(); return; }
+    if (!st) {
+      const s = ST.syncState ? ST.syncState() : "local";
+      if ((s === "connecting" || s === "slow" || s === "synced") && ST.serverSeen && !ST.serverSeen()) {
+        waitingForAccount = true;
+        modal(`<h2>Loading your empire…</h2><p class="tip">Checking your account for an empire you started on another device.</p>
+          <div class="m-actions"><button class="btn" data-x>Close</button></div>`, e => { if (e.target.closest("[data-x]")) { waitingForAccount = false; closeModal(); close(); } });
+        return;
+      }
+      showFounding(); return;
+    }
     if (!ready) {
       $("empLoading").hidden = false;
       setTimeout(() => { sync(true); $("empLoading").hidden = true; start(); }, 30);
@@ -1001,5 +1045,5 @@
   // load the era fonts early so map labels render in them
   if (document.fonts) ERAS.forEach(e => document.fonts.load(`${e.weight} 16px "${e.font}"`).catch(() => {}));
 
-  window.Empire = { open, close, toggle: () => (isOpen() ? close() : open()), _debug: { map: () => map, view, state: () => st } };
+  window.Empire = { open, close, applyRemote, toggle: () => (isOpen() ? close() : open()), _debug: { map: () => map, view, state: () => st } };
 })();
