@@ -367,6 +367,10 @@
   .sync { margin-top: 16px; font-size: 12px; color: var(--faint); text-align: center; display: flex; align-items: center; justify-content: center; gap: 7px; }
   .sync::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--faint); }
   .sync.ok::before { background: #6fcf97; box-shadow: 0 0 8px #6fcf97; }
+  .scard .line3 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; font-size: 12px; color: var(--muted); }
+  .scard .line3 label { display: flex; align-items: center; gap: 8px; }
+  .scard .line3 select { background: rgba(0,0,0,.35); color: var(--text); border: 1px solid var(--line); border-radius: 9px; padding: 6px 8px; font-size: 13px; max-width: 220px; }
+  .scard .line3 .rdesc { color: var(--faint); }
   .acct { margin-top: 12px; display: flex; flex-direction: column; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); text-align: center; }
   .acct[hidden] { display: none; }
   .acct .g-btn { display: inline-flex; align-items: center; gap: 9px; background: #fff; color: #1f1f1f; border: 0; border-radius: 999px;
@@ -662,6 +666,7 @@
       created: +s.created || 0,
       exam: /^\d{4}-\d\d-\d\d$/.test(s.exam) ? s.exam : "",
       examHours: Math.max(0, Math.min(2000, +s.examHours || 0)),
+      kind: typeof s.kind === "string" && /^[a-z]{0,12}$/.test(s.kind) ? s.kind : "",
     };
   }
   let subjects = {};
@@ -1529,6 +1534,16 @@
     if (document.activeElement !== $("goal")) $("goal").value = goalMin;
   }
 
+  // the subject's role in the empire (what it builds); "" = guess from the name
+  function roleRow(id, s) {
+    const E = window.Empire, guess = E.guessKind(id, s.name), cur = s.kind || "";
+    const label = k => (E.ROLES.find(r => r[0] === k) || [k, k])[1];
+    const desc = (E.ROLES.find(r => r[0] === (cur || guess)) || ["", "", ""])[2];
+    return `<div class="line3"><label>Role in empire<select class="skind">
+        <option value=""${cur ? "" : " selected"}>Auto · ${esc(label(guess))}</option>
+        ${E.ROLES.map(([k, l]) => `<option value="${k}"${cur === k ? " selected" : ""}>${esc(l)}</option>`).join("")}
+      </select></label><span class="rdesc">${esc(desc)}</span></div>`;
+  }
   function renderSubjects() {
     const list = activeSubjects();
     $("subjList").innerHTML = list.map(([id, s]) => `
@@ -1543,6 +1558,7 @@
           <label>Exam date<input type="date" class="sexam" value="${s.exam || ""}" min="${today()}"></label>
           <label>Hours before exam<span><input type="number" class="shours" value="${s.examHours || ""}" placeholder="—" min="0" max="2000" step="1" inputmode="numeric"> h</span></label>
         </div>
+        ${window.Empire && window.Empire.ROLES ? roleRow(id, s) : ""}
       </div>`).join("") || `<div class="empty">No subjects yet.</div>`;
   }
   function editSubject(id, changes) {
@@ -1936,6 +1952,9 @@
     } else if (e.target.classList.contains("sexam")) {
       const v = e.target.value;
       editSubject(id, { exam: /^\d{4}-\d\d-\d\d$/.test(v) ? v : "" });
+    } else if (e.target.classList.contains("skind")) {
+      editSubject(id, { kind: e.target.value });
+      renderSubjects();
     } else if (e.target.classList.contains("shours")) {
       const h = Math.max(0, Math.min(2000, Math.round(+e.target.value || 0)));
       e.target.value = h || "";

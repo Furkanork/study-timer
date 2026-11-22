@@ -52,17 +52,43 @@
     health: { label: "Healer", effect: "+50% population in this province",
               names: ["Herb Garden", "Monastery Infirmary", "Apothecary", "Hospital", "Medical Centre"],
               icon: "M5 19c0-8 6-14 14-14 0 8-6 14-14 14zM5 19l7-7" },
-    learn:  { label: "Library", effect: "+25% population in this province",
+    math:   { label: "Mint", effect: "+6% gold from all study (up to +60%)",
+              names: ["Treasury", "Royal Mint", "Counting House", "Central Bank", "Reserve Bank"],
+              icon: "M17 5H7l6 7-6 7h10" },
+    science:{ label: "Laboratory", effect: "Technologies cost 8% less (up to 48%)",
+              names: ["Observatory", "Alchemist's Tower", "Academy of Sciences", "Laboratory", "Research Lab"],
+              icon: "M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-9V3M7.5 15h9" },
+    arts:   { label: "Theatre", effect: "+25% population; this province never revolts",
+              names: ["Amphitheatre", "Cathedral", "Opera House", "Museum", "Arts Centre"],
+              icon: "M4 5h16v5a8 8 0 0 1-16 0zM9 9h.01M15 9h.01M9 13a4 4 0 0 0 6 0" },
+    learn:  { label: "Library", effect: "+3% subject points from all study (up to +30%)",
               names: ["Library", "Scriptorium", "Academy", "University", "Research Institute"],
               icon: "M4 5h6a2 2 0 0 1 2 2v12a2 2 0 0 0-2-2H4zM20 5h-6a2 2 0 0 0-2 2v12a2 2 0 0 1 2-2h6z" },
   };
+  // what role a subject plays: chosen in Progress → Subjects, or guessed from its name
+  const ROLES = [
+    ["law", "Law & politics", "Courthouses — protect provinces from raids"],
+    ["trade", "Languages & business", "Markets — more gold, and pay for peace treaties"],
+    ["health", "Medicine & biology", "Healers — population boom"],
+    ["math", "Math & economics", "Mints — the most gold"],
+    ["science", "Science & tech", "Laboratories — cheaper technology"],
+    ["arts", "History, literature & arts", "Theatres — population, no revolts"],
+    ["learn", "Anything else", "Libraries — more subject points"],
+  ];
+  function guessKind(sid, name) {
+    const n = (name || sid || "").toLowerCase();
+    if (sid === "law" || /law|legal|jur|politic|recht|droit/.test(n)) return "law";
+    if (sid === "french" || /french|english|spanish|german|italian|dutch|turkish|arabic|chinese(?! med)|japanese|language|langue|business|marketing|management/.test(n)) return "trade";
+    if (sid === "tcm" || /tcm|medic|health|bio|chinese med|anat|nurs|pharm|physio/.test(n)) return "health";
+    if (/math|calcul|algebra|statist|econ|financ|account|geometr/.test(n)) return "math";
+    if (/physic|chem|engineer|computer|program|coding|informat|tech|electr|science/.test(n)) return "science";
+    if (/histor|literat|art|philos|music|design|religio|classic|poetry|writing/.test(n)) return "arts";
+    return "learn";
+  }
   function kindOf(sid) {
     const s = ST.getSubjects()[sid];
-    const n = ((s && s.name) || sid).toLowerCase();
-    if (sid === "law" || /law|legal|jur/.test(n)) return "law";
-    if (sid === "french" || /french|english|spanish|german|language|langue|trade|econ/.test(n)) return "trade";
-    if (sid === "tcm" || /tcm|medic|health|bio|chinese med|anat/.test(n)) return "health";
-    return "learn";
+    if (s && s.kind && KINDS[s.kind]) return s.kind;
+    return guessKind(sid, s && s.name);
   }
   const CROWN = new Path2D("M3 18h18M4 18L3 7l5 4 4-7 4 7 5-4-1 11");
   const STAR = new Path2D("M12 2l3 7h7l-5.5 4.5 2 7.5L12 17l-6.5 4 2-7.5L2 9h7z");
@@ -360,14 +386,16 @@
     return n;
   }
   const goldMult = () => 1 + Math.min(.5, countKind("trade") * (tech("guilds") ? .07 : .05)) + (st && st.decrees ? streakBonus() : 0)
-    + (tech("banking") ? .1 : 0) + (tech("internet") ? .15 : 0) + (wonderDone("trade") ? .15 : 0);
-  const ptsMult = () => 1 + (tech("printing") ? .1 : 0) + (wonderDone("learn") ? .1 : 0);
+    + (tech("banking") ? .1 : 0) + (tech("internet") ? .15 : 0) + (wonderDone("trade") ? .15 : 0)
+    + Math.min(.6, countKind("math") * .06) + (wonderDone("math") ? .2 : 0);
+  const ptsMult = () => 1 + (tech("printing") ? .1 : 0) + (wonderDone("learn") ? .1 : 0) + Math.min(.3, countKind("learn") * .03);
+  const techDiscount = () => Math.min(.48, countKind("science") * .08) + (wonderDone("science") ? .25 : 0);
   const repelChance = () => Math.min(.85, .5 + (tech("fortify") ? .1 : 0) + (wonderDone("law") ? .25 : 0));
   function provPop(p) {
     const o = map.P[p]; let pop = TERRAIN[o.t].pop + (o.coastal ? 4 : 0);
     let m = 1;
-    for (const sid in (st.bld[p] || {})) { const k = kindOf(sid); if (k === "health") m += tech("herbal") ? .75 : .5; else if (k === "learn") m += .25; }
-    const g = (tech("medicine") ? 1.2 : 1) * (tech("healthcare") ? 1.5 : 1) * (wonderDone("health") ? 1.25 : 1);
+    for (const sid in (st.bld[p] || {})) { const k = kindOf(sid); if (k === "health") m += tech("herbal") ? .75 : .5; else if (k === "arts") m += .25; }
+    const g = (tech("medicine") ? 1.2 : 1) * (tech("healthcare") ? 1.5 : 1) * (wonderDone("health") ? 1.25 : 1) * (wonderDone("arts") ? 1.15 : 1);
     return pop * m * g * [1, 1.6, 2.5, 4, 7][eraIdx()] * 1000;
   }
   const fmtPop = n => n >= 1e6 ? (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + "M" : Math.round(n / 1000) + "k";
@@ -572,10 +600,12 @@
     const t = ST.activeSubjects().filter(([id]) => kindOf(id) === kind).sort((a, b) => (st.pts[b[0]] || 0) - (st.pts[a[0]] || 0));
     return t[0] ? t[0][0] : null;
   }
+  // science subjects pay for gold-priced discoveries with their own points; laboratories make everything cheaper
   function priceOf(cost) {
-    if (cost.gold) return { gold: cost.gold };
+    const k = 1 - techDiscount();
+    if (cost.gold) { const sci = payer("science"); return sci ? { sid: sci, n: Math.round(cost.gold * k) } : { gold: Math.round(cost.gold * k) }; }
     const sid = payer(cost.kind);
-    return sid ? { sid, n: cost.n } : { gold: cost.n * 2 };
+    return sid ? { sid, n: Math.round(cost.n * k) } : { gold: Math.round(cost.n * 2 * k) };
   }
   const canPay = pr => pr.gold ? st.gold >= pr.gold : (st.pts[pr.sid] || 0) >= pr.n;
   const pay = pr => { if (pr.gold) st.gold -= pr.gold; else st.pts[pr.sid] -= pr.n; };
@@ -593,6 +623,9 @@
     law:    { name: "Grand Tribunal",      effect: "Courthouses repel raiders 25% more often" },
     trade:  { name: "Great Bazaar",        effect: "+15% gold from all study" },
     health: { name: "Garden of Remedies",  effect: "+25% population everywhere" },
+    math:   { name: "Royal Mint",          effect: "+20% gold from all study" },
+    science:{ name: "Grand Observatory",   effect: "Technologies cost 25% less" },
+    arts:   { name: "Great Amphitheatre",  effect: "+15% population everywhere and decree rewards +50%" },
     learn:  { name: "Great Library",       effect: "+10% subject points from all study" },
   };
   const WONDER_COST = 2400;   // 40 hours of that subject
@@ -617,6 +650,8 @@
     plague:  { kind: "health", title: "Plague in {p}", text: "Sickness spreads through {p}. Study {g} of {s} this week to contain it.", win: "+120 gold, and {p} is saved", lose: "{p} loses one of its buildings" },
     boom:    { kind: "trade", title: "Trade boom", text: "Merchants flock to your markets. Study {g} of {s} this week to cash in.", win: "+250 gold", lose: "the boom passes you by" },
     revolt:  { kind: "law", title: "Unrest in {p}", text: "The people of {p} are restless. Study {g} of {s} this week to restore order.", win: "+80 gold and a free courthouse in {p}", lose: "{p} breaks away and becomes free land" },
+    audit:   { kind: "math", title: "Treasury audit", text: "The royal accounts are a mess. Study {g} of {s} this week to balance the books.", win: "+250 gold", lose: "15% of your gold goes missing" },
+    invent:  { kind: "science", title: "Inventor at court", text: "An inventor seeks your patronage. Study {g} of {s} this week to fund the work.", win: "+150 points for every science subject", lose: "the inventor leaves for a rival court" },
     scholar: { kind: null, title: "Wandering scholars", text: "Scholars visit your court. Study {g} in total this week to impress them.", win: "+60 points for every subject", lose: "they move on" },
   };
   function makeEvent(w) {
@@ -637,7 +672,7 @@
     else { const tot = ST.activeSubjects().reduce((s, [, x]) => s + (x.target || 0), 0); goal = Math.max(4, Math.round(tot * .7 * 2) / 2 || 6); }
     let p = -1;
     if (type === "plague") { const c = owned.filter(q => Object.keys(st.bld[q] || {}).length); p = c[Math.floor(rand() * c.length)]; }
-    if (type === "revolt") { const c = owned.filter(q => !hasKind(q, "law")); p = (c.length ? c : owned)[Math.floor(rand() * (c.length || owned.length))]; }
+    if (type === "revolt") { const c = owned.filter(q => !hasKind(q, "law") && !hasKind(q, "arts")); p = (c.length ? c : owned)[Math.floor(rand() * (c.length || owned.length))]; }
     return { type, sid, goal, p, resolved: false, seen: false };
   }
   function eventText(ev, field) {
@@ -662,9 +697,12 @@
       if (ev.type === "boom") st.gold += 250;
       if (ev.type === "revolt") { st.gold += 80; if (st.owner[ev.p] === 0 && ev.sid) (st.bld[ev.p] = st.bld[ev.p] || {})[ev.sid] = 1; }
       if (ev.type === "scholar") for (const [id] of ST.activeSubjects()) st.pts[id] = (st.pts[id] || 0) + 60;
+      if (ev.type === "audit") st.gold += 250;
+      if (ev.type === "invent") for (const [id] of ST.activeSubjects()) if (kindOf(id) === "science") st.pts[id] = (st.pts[id] || 0) + 150;
     } else {
       if (ev.type === "plague" && st.bld[ev.p]) { const k = Object.keys(st.bld[ev.p]); if (k.length) delete st.bld[ev.p][k[Math.floor(Math.random() * k.length)]]; }
-      if (ev.type === "revolt" && st.owner[ev.p] === 0 && ev.p !== st.capital) st.owner[ev.p] = -1;
+      if (ev.type === "revolt" && st.owner[ev.p] === 0 && ev.p !== st.capital && !hasKind(ev.p, "arts")) st.owner[ev.p] = -1;
+      if (ev.type === "audit") st.gold = Math.max(0, st.gold * .85);
     }
     const line = `${eventText(ev, "title")}: ${ev.won ? "success — " + eventText(ev, "win") : "failed — " + eventText(ev, "lose")}`;
     logEvent(`Week of ${shortDate(w)}: ${line}`, ev.won ? "good" : "raid");
@@ -708,7 +746,7 @@
       for (const it of D.items) {
         if (it.done || daySecs(d, it.sid) < it.secs) continue;
         it.done = true;
-        const reward = (25 + 5 * Math.min(10, streak())) * (tech("monastery") ? 2 : 1);
+        const reward = Math.round((25 + 5 * Math.min(10, streak())) * (tech("monastery") ? 2 : 1) * (wonderDone("arts") ? 1.5 : 1));
         st.gold += reward;
         if (!silent && d === today) setTimeout(() => ST.toast(`Decree fulfilled: ${decreeText(it)} · +${reward} gold`, "#f2c94c"), 900);
       }
@@ -1528,7 +1566,7 @@
       <ul class="help-list">
         <li><span class="coin"></span><div><b>Study earns gold.</b> Every focus minute = 1 gold (more with markets). Spend gold to claim provinces on your border — wild land is cheapest, rival land costs 50% more, mountains and hills cost extra. Each new province costs a bit more than the last.</div></li>
         <li><i style="background:#56b4e9"></i><div><b>Each subject builds its own thing.</b> Minutes studied in a subject become that subject's points:
-          Law builds <b>courthouses</b> (50% chance to repel raiders there; they cost twice as much), French builds <b>markets</b> (+5% gold each), TCM builds <b>healers</b> (+50% population). Other subjects build libraries.</div></li>
+          What a subject builds depends on its <b>role</b>, which you can set per subject in Progress → Subjects: law → <b>courthouses</b> (50% chance to repel raiders), languages & business → <b>markets</b> (+5% gold, pay for treaties), medicine → <b>healers</b> (+50% population), math & economics → <b>mints</b> (+6% gold), physics & science → <b>laboratories</b> (cheaper technology, and science points pay for gold-priced discoveries), history & arts → <b>theatres</b> (+25% population, no revolts), anything else → <b>libraries</b> (+3% subject points).</div></li>
         <li><i style="background:#eb8c6a"></i><div><b>Miss a weekly target, get raided.</b> Every Monday each subject's target from last week is checked. Fall short and rival nations seize border provinces — 1 to 4, depending on how short you were. Your capital is always safe; courthouses give a 50% chance to hold. Hit a target and you get 20 gold tribute. Rivals also grab one free province each every week, so claim the wilds before they do.</div></li>
         <li><i style="background:#d9d6d8"></i><div><b>Daily decrees.</b> Each day you get 1–2 tasks based on your weekly targets (e.g. "Law 2h20"). Each fulfilled decree pays gold, and every day you complete them all adds +3% to all study gold, up to +30% for a 10-day streak.</div></li>
         <li><i style="background:#e0565b"></i><div><b>Exam campaigns.</b> Set an exam date for a subject (Progress → Subjects) and 4 weeks before it a rival declares war. Study that subject's weekly target × 4 weeks by exam day to win 3–5 of their provinces and 150 gold. Fall short and they take 3–6 of yours.</div></li>
@@ -1718,5 +1756,5 @@
       provinces: b ? cnt(b) : ownedList().length, gained: a && b ? cnt(b) - cnt(a) : null,
       wars: Object.values(st.wars || {}).filter(w => w.resolved && w.exam >= from && w.exam <= to).map(w => ({ won: w.won, enemy: st.rivals[w.enemy - 1].name })) };
   }
-  window.Empire = { open, close, applyRemote, summary, toggle: () => (isOpen() ? close() : open()), _debug: { map: () => map, view, state: () => st } };
+  window.Empire = { open, close, applyRemote, summary, ROLES, guessKind, KINDS, toggle: () => (isOpen() ? close() : open()), _debug: { map: () => map, view, state: () => st } };
 })();
