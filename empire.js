@@ -318,7 +318,7 @@
     for (const p in st.bld) for (const sid in st.bld[p]) if (st.owner[p] === 0 && kindOf(sid) === kind) n++;
     return n;
   }
-  const goldMult = () => 1 + Math.min(.5, countKind("trade") * .05);
+  const goldMult = () => 1 + Math.min(.5, countKind("trade") * .05) + (st && st.decrees ? streakBonus() : 0);
   function provPop(p) {
     const o = map.P[p]; let pop = TERRAIN[o.t].pop + (o.coastal ? 4 : 0);
     let m = 1;
@@ -407,7 +407,6 @@
       st.raidWeek = w;
       w = addDays(w, 7);
     }
-    save();
   }
   // each week every rival nation takes one free province next to it (same result on every device)
   function rivalsGrow(w, rep) {
@@ -434,23 +433,7 @@
       const done = weekSecs(w, sid) / 3600;
       if (done >= s.target) { rep.tribute += 20; rep.lines.push({ sid, done, target: s.target, ok: true }); continue; }
       const n = Math.min(4, Math.ceil((1 - done / s.target) * 4));
-      const lost = [], tried = [], repelled = [];
-      for (let i = 0; i < n; i++) {
-        const owned = ownedList();
-        if (owned.length <= 1) break;
-        const cands = owned.filter(p => p !== st.capital && !tried.includes(p) && map.P[p].nb.some(nb => st.owner[nb] !== 0));
-        if (!cands.length) break;
-        const score = p => map.P[p].nb.filter(nb => st.owner[nb] > 0).length + Math.random() * .9;
-        cands.sort((a, b) => score(b) - score(a));
-        const p = cands[0];
-        tried.push(p);
-        if (hasKind(p, "law") && Math.random() < .5) { repelled.push(p); continue; }
-        const tally = {};
-        map.P[p].nb.forEach(nb => { if (st.owner[nb] > 0) tally[st.owner[nb]] = (tally[st.owner[nb]] || 0) + 1; });
-        const taker = Object.keys(tally).sort((a, b) => tally[b] - tally[a])[0];
-        st.owner[p] = taker ? +taker : -1;
-        lost.push({ p, by: taker ? st.rivals[taker - 1].name : "Rebels" });
-      }
+      const { lost, repelled } = seizeBorder(n, null, w);
       const shielded = repelled.length > 0;
       rep.lines.push({ sid, done, target: s.target, ok: false, lost, shielded, repelled: repelled.map(p => map.P[p].name) });
       const held = repelled.length ? ` · courthouses repelled raiders at ${repelled.map(p => map.P[p].name).join(", ")}` : "";
@@ -462,6 +445,186 @@
     st.reports = st.reports.slice(-6);
   }
   const hasKind = (p, kind) => Object.keys(st.bld[p] || {}).some(sid => kindOf(sid) === kind);
+
+  // Take up to n of your border provinces. enemy = a specific rival (war) or null (any hostile neighbour / rebels).
+  // Rivals you have a treaty with never take land; courthouses repel 50% of attempts.
+  function seizeBorder(n, enemy, day) {
+    const lost = [], tried = [], repelled = [];
+    const hostile = r => r > 0 && (enemy ? r === enemy : !atPeace(r, day));
+    const canTake = p => map.P[p].nb.some(nb => hostile(st.owner[nb]) || (!enemy && st.owner[nb] === -1));
+    for (let i = 0; i < n; i++) {
+      const owned = ownedList();
+      if (owned.length <= 1) break;
+      let cands = owned.filter(p => p !== st.capital && !tried.includes(p) && canTake(p));
+      if (!cands.length && enemy) cands = owned.filter(p => p !== st.capital && !tried.includes(p) && map.P[p].nb.some(nb => st.owner[nb] !== 0));
+      if (!cands.length) break;
+      const score = p => map.P[p].nb.filter(nb => hostile(st.owner[nb])).length + Math.random() * .9;
+      cands.sort((a, b) => score(b) - score(a));
+      const p = cands[0];
+      tried.push(p);
+      if (hasKind(p, "law") && Math.random() < .5) { repelled.push(p); continue; }
+      let taker = enemy;
+      if (!taker) {
+        const tally = {};
+        map.P[p].nb.forEach(nb => { const r = st.owner[nb]; if (hostile(r)) tally[r] = (tally[r] || 0) + 1; });
+        taker = +(Object.keys(tally).sort((a, b) => tally[b] - tally[a])[0] || 0);
+      }
+      st.owner[p] = taker || -1;
+      lost.push({ p, by: taker ? st.rivals[taker - 1].name : "Rebels" });
+    }
+    return { lost, repelled };
+  }
+
+  // ---------- diplomacy: French (trade) points buy peace treaties ----------
+  const TREATY_WEEKS = 4;
+  const atPeace = (r, day) => !!(st.treaties && st.treaties[r] && st.treaties[r] > (day || todayK()));
+  const activeTreaties = () => Object.keys(st.treaties || {}).filter(r => atPeace(+r)).length;
+  const treatyCost = () => 150 + 50 * activeTreaties();
+  function tradeSubject() {
+    const t = ST.activeSubjects().filter(([id]) => kindOf(id) === "trade");
+    t.sort((a, b) => (st.pts[b[0]] || 0) - (st.pts[a[0]] || 0));
+    return t[0] ? t[0][0] : null;
+  }
+  function bordersYou(r) {
+    for (let p = 0; p < map.N; p++) if (st.owner[p] === r && map.P[p].nb.some(n => st.owner[n] === 0)) return true;
+    return false;
+  }
+  function warWith(r) { return Object.values(st.wars || {}).find(w => !w.resolved && w.enemy === r); }
+  function signTreaty(r) {
+    const sid = tradeSubject(), c = treatyCost();
+    if (!sid || (st.pts[sid] || 0) < c || atPeace(r) || warWith(r)) return;
+    st.pts[sid] -= c;
+    st.treaties = st.treaties || {};
+    st.treaties[r] = addDays(todayK(), 7 * TREATY_WEEKS);
+    logEvent(`Peace treaty signed with ${st.rivals[r - 1].name} until ${shortDate(st.treaties[r])}`, "peace");
+    save();
+    ST.toast(`Peace with ${st.rivals[r - 1].name} for ${TREATY_WEEKS} weeks`, "#6fcf97");
+  }
+
+  // ---------- daily decrees (built from weekly targets) ----------
+  const daySecs = (day, sid) => { const r = ST.getHistory()[day]; return r ? (sid ? +(r.by || {})[sid] || 0 : +r.f || 0) : 0; };
+  function makeDecrees(day) {
+    const mon = weekOf(day), idx = Math.round((kd(day) - kd(mon)) / 86400000), left = 7 - idx;
+    const items = [];
+    for (const [sid, s] of ST.activeSubjects()) {
+      if (!(s.target > 0)) continue;
+      let before = 0;
+      for (let i = 0; i < idx; i++) before += daySecs(addDays(mon, i), sid);
+      const need = Math.max(0, s.target * 3600 - before) / left;
+      if (need >= 600) items.push({ sid, secs: Math.min(4 * 3600, Math.max(1200, Math.round(need / 300) * 300)), done: false });
+    }
+    items.sort((a, b) => b.secs - a.secs);
+    const pick = items.slice(0, 2);
+    if (!pick.length) pick.push({ sid: null, secs: ST.activeSubjects().some(([, s]) => s.target > 0) ? 1800 : 3600, done: false });
+    return { items: pick, all: false };
+  }
+  function streak() {
+    let n = 0, d = todayK();
+    const D = st.decrees || {};
+    if (D[d] && D[d].all) n++;
+    for (d = addDays(d, -1); D[d] && D[d].all; d = addDays(d, -1)) n++;
+    return n;
+  }
+  const streakBonus = () => Math.min(.3, streak() * .03);
+  function updateDecrees(silent) {
+    if (ST.syncReady && !ST.syncReady()) return;
+    st.decrees = st.decrees || {};
+    const today = todayK();
+    let from = addDays(today, -13);
+    if (from < st.founded) from = st.founded;
+    for (let d = from; d <= today; d = addDays(d, 1)) {
+      if (!st.decrees[d]) st.decrees[d] = makeDecrees(d);
+      const D = st.decrees[d];
+      for (const it of D.items) {
+        if (it.done || daySecs(d, it.sid) < it.secs) continue;
+        it.done = true;
+        const reward = 25 + 5 * Math.min(10, streak());
+        st.gold += reward;
+        if (!silent && d === today) setTimeout(() => ST.toast(`Decree fulfilled: ${decreeText(it)} · +${reward} gold`, "#f2c94c"), 900);
+      }
+      if (!D.all && D.items.every(i => i.done)) {
+        D.all = true;
+        if (d === today) logEvent(`All of today's decrees fulfilled — ${streak()}-day streak`, "good");
+      }
+    }
+    for (const k in st.decrees) if (k < addDays(today, -40)) delete st.decrees[k];
+  }
+  function decreeText(it) {
+    const s = it.sid ? ST.getSubjects()[it.sid] : null;
+    return `${s ? s.name : "Any subject"} ${fmtH(it.secs)}`;
+  }
+
+  // ---------- exam campaigns ----------
+  const WAR_DAYS = 28;
+  function updateWars() {
+    if (ST.syncReady && !ST.syncReady()) return;
+    st.wars = st.wars || {};
+    const today = todayK(), subs = ST.getSubjects();
+    for (const [sid, s] of ST.activeSubjects()) {
+      if (!s.exam || s.exam <= today) continue;
+      const key = sid + "@" + s.exam;
+      let start = addDays(s.exam, -WAR_DAYS);
+      if (st.wars[key] || today < start) continue;
+      if (start < st.founded) start = st.founded;
+      const enemy = pickEnemy();
+      if (!enemy) continue;
+      const weeks = Math.max(1, (kd(s.exam) - kd(start)) / (7 * 86400000));
+      const goal = Math.max(2, Math.round((s.target > 0 ? s.target : 3) * weeks * 2) / 2);
+      st.wars[key] = { sid, exam: s.exam, start, enemy, goal, resolved: false, seen: false };
+      if (st.treaties) delete st.treaties[enemy];
+      logEvent(`${st.rivals[enemy - 1].name} declared war! Study ${goal}h of ${s.name} before your exam on ${shortDate(s.exam)} to win`, "war");
+    }
+    for (const key in st.wars) {
+      const w = st.wars[key];
+      if (w.resolved) continue;
+      const s = subs[w.sid];
+      if (!s || s.archived || (s.exam !== w.exam && today < w.exam)) { delete st.wars[key]; continue; }   // exam moved or removed
+      if (today < w.exam) continue;
+      resolveWar(w);
+    }
+  }
+  function pickEnemy() {
+    const busy = new Set(Object.values(st.wars || {}).filter(w => !w.resolved).map(w => w.enemy));
+    let best = 0, bs = -1;
+    st.rivals.forEach((R, i) => {
+      const r = i + 1;
+      if (busy.has(r)) return;
+      let border = 0, size = 0;
+      for (let p = 0; p < map.N; p++) if (st.owner[p] === r) { size++; if (map.P[p].nb.some(n => st.owner[n] === 0)) border++; }
+      if (!size) return;
+      const sc = border * 10 + size;
+      if (sc > bs) { bs = sc; best = r; }
+    });
+    return best;
+  }
+  const warHours = w => { let s = 0; for (let d = w.start; d < w.exam; d = addDays(d, 1)) s += daySecs(d, w.sid); return s / 3600; };
+  function resolveWar(w) {
+    const hrs = warHours(w), name = st.rivals[w.enemy - 1].name, sname = (ST.getSubjects()[w.sid] || {}).name || "Subject";
+    w.hours = Math.round(hrs * 10) / 10;
+    w.resolved = true; w.seen = false;
+    w.won = hrs >= w.goal;
+    if (w.won) {
+      const n = 3 + (hrs >= w.goal * 1.25 ? 2 : 0);
+      const taken = [];
+      for (let i = 0; i < n; i++) {
+        let cands = [];
+        for (let p = 0; p < map.N; p++) if (st.owner[p] === w.enemy && map.P[p].nb.some(nb => st.owner[nb] === 0)) cands.push(p);
+        if (!cands.length) for (let p = 0; p < map.N; p++) if (st.owner[p] === w.enemy) cands.push(p);
+        if (!cands.length) break;
+        const p = cands[Math.floor(Math.random() * cands.length)];
+        st.owner[p] = 0; taken.push(map.P[p].name);
+      }
+      st.gold += 150;
+      w.taken = taken;
+      logEvent(`Victory over ${name}! ${sname} exam campaign won (${w.hours}/${w.goal}h) — took ${taken.join(", ") || "their treasury"} and 150 gold`, "war");
+    } else {
+      const n = 3 + Math.round((1 - hrs / w.goal) * 3);
+      const { lost, repelled } = seizeBorder(n, w.enemy, w.exam);
+      w.lost = lost.map(l => map.P[l.p].name); w.repelled = repelled.map(p => map.P[p].name);
+      logEvent(`Defeat against ${name} — ${sname} exam campaign lost (${w.hours}/${w.goal}h)${w.lost.length ? ", lost " + w.lost.join(", ") : ""}`, "war");
+    }
+    (st.trophies = st.trophies || []).push({ sid: w.sid, name: sname, exam: w.exam, won: w.won, hours: w.hours, goal: w.goal, enemy: name });
+  }
 
   function checkEra() {
     const e = eraIdx();
@@ -477,10 +640,16 @@
 
   function sync(silent) {
     if (!st) return;
+    if (ST.syncReady && !ST.syncReady()) return;   // don't touch a possibly stale copy until the account has loaded
+    const before = JSON.stringify(st);
     credit(silent);
     processWeeks();
+    if (map || (st.wars && Object.keys(st.wars).length) || ST.activeSubjects().some(([, s]) => s.exam)) { ensureMap(); updateWars(); }
+    updateDecrees(silent);
+    if (JSON.stringify(st) !== before) save();
+    renderStrip();
     checkEra();
-    if (isOpen()) { if (st.reports.some(r => !r.seen)) showReports(); refresh(); }
+    if (isOpen()) { if (st.reports.some(r => !r.seen)) showReports(); else showWarNews(); refresh(); }
     else if (st.reports.some(r => !r.seen && r.lines.some(l => !l.ok && l.lost && l.lost.length))) $("empireBtn").classList.add("alert");
   }
 
@@ -492,6 +661,7 @@
     <div class="emp-top">
       <div class="emp-title"><div class="emp-name" id="empName"></div><div class="emp-sub" id="empSub"></div></div>
       <div class="emp-btns">
+        <button class="eb" id="empDipBtn" title="Diplomacy"><svg viewBox="0 0 24 24"><path d="M11 17l-2 2a2 2 0 0 1-3-3l4-4"/><path d="M14 7l2-2a2 2 0 0 1 3 3l-5 5"/><path d="M2 11l4-4 4 1 3-2 3 1"/><path d="M22 13l-4 4-3-1-2 2"/><path d="M8 13l3 3M11 10l3 3"/></svg></button>
         <button class="eb" id="empLogBtn" title="Chronicle"><svg viewBox="0 0 24 24"><path d="M6 3h11a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a3 3 0 0 1-3-3V5"/><path d="M8 8h7M8 12h7M8 16h4"/></svg></button>
         <button class="eb" id="empHelpBtn" title="How it works"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 4.9.7c0 1.7-2.4 2.3-2.4 3.8M12 17h.01"/></svg></button>
         <button class="eb" id="empSetBtn" title="Settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
@@ -669,6 +839,14 @@
       ctx.lineWidth = 3; ctx.strokeStyle = E.halo; ctx.fillStyle = E.ink; ctx.globalAlpha = +o === 0 ? .95 : .72;
       ctx.strokeText(label.toUpperCase(), x, y); ctx.fillText(label.toUpperCase(), x, y);
       ctx.globalAlpha = 1;
+      const tag = +o > 0 ? (warWith(+o) ? ["AT WAR", "#e0565b"] : atPeace(+o) ? ["AT PEACE", "#3f9d6a"] : null) : null;
+      if (tag) {
+        const ts = clamp(Math.min(sz, 46) * .38, 9, 14);
+        ctx.font = `800 ${ts}px Inter, sans-serif`;
+        if ("letterSpacing" in ctx) ctx.letterSpacing = "1.5px";
+        ctx.lineWidth = 3; ctx.strokeStyle = "rgba(0,0,0,.55)"; ctx.fillStyle = tag[1];
+        ctx.strokeText(tag[0], x, y + Math.min(sz, 46) * .72); ctx.fillText(tag[0], x, y + Math.min(sz, 46) * .72);
+      }
     }
     if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
     // province names when zoomed in
@@ -805,7 +983,8 @@
     $("empRes").innerHTML =
       `<span class="pill" title="Gold — 1 per focus minute${goldMult() > 1 ? ", +" + Math.round((goldMult() - 1) * 100) + "% from markets" : ""}. Spend it to claim land.">${COIN}<b>${Math.floor(st.gold)}</b></span>`
       + subs.map(([id, s]) => `<span class="pill" title="${esc(s.name)} points — 1 per minute studied. Builds ${KINDS[kindOf(id)].label.toLowerCase()}s."><i style="background:${s.color}"></i><svg viewBox="0 0 24 24"><path d="${KINDS[kindOf(id)].icon}"/></svg><b>${Math.floor(st.pts[id] || 0)}</b></span>`).join("")
-      + `<span class="pill dim" title="Provinces · population"><b>${owned.length}</b> prov · ${fmtPop(pop)}</span>`;
+      + `<span class="pill dim" title="Provinces · population"><b>${owned.length}</b> prov · ${fmtPop(pop)}</span>`
+      + courtPills();
     // border watch
     const monday = weekOf(todayK());
     const left = 7 - ((new Date().getDay() + 6) % 7);
@@ -841,8 +1020,11 @@
       }).join("");
       if (!opts.length && !blds.length) body += `<p class="s-note">Add subjects to unlock buildings.</p>`;
       body += `<p class="s-note">Population ${fmtPop(provPop(p))}${p === st.capital ? " · Capital — can never be lost" : hasKind(p, "law") ? " · Courthouse: 50% chance to repel raiders" : ""}</p>`;
+    } else if (o > 0 && atPeace(o)) {
+      body += `<p class="s-note">At peace with ${esc(st.rivals[o - 1].name)} until ${shortDate(st.treaties[o])} — you can't conquer their land until then.</p>`;
     } else if (isClaimable(p)) {
       const c = claimCost(p);
+      if (o > 0 && warWith(o)) body += `<p class="s-note war-note">You're at war with ${esc(st.rivals[o - 1].name)} — win the exam campaign to take their land.</p>`;
       body += `<button class="s-act claim" data-claim="${p}" ${st.gold >= c ? "" : "disabled"}>
         <span>${o > 0 ? "Conquer" : "Claim"} ${esc(P.name)}<small>${o > 0 ? "Rival land costs 50% more" : "Expand your borders"} · ${TERRAIN[P.t].label}${TERRAIN[P.t].cost !== 1 ? " ×" + TERRAIN[P.t].cost : ""}</small></span>
         <em>${COIN}${c}${st.gold < c ? ` <u>need ${Math.ceil(c - st.gold)} more min</u>` : ""}</em></button>`;
@@ -860,7 +1042,7 @@
     if (!b || b.disabled) return;
     if (b.dataset.claim) {
       const p = +b.dataset.claim, c = claimCost(p);
-      if (!isClaimable(p) || st.gold < c) return;
+      if (!isClaimable(p) || st.gold < c || (st.owner[p] > 0 && atPeace(st.owner[p]))) return;
       const was = st.owner[p];
       st.gold -= c; st.owner[p] = 0;
       logEvent(`${was > 0 ? "Conquered" : "Claimed"} ${map.P[p].name}${was > 0 ? " from " + st.rivals[was - 1].name : ""}`, "claim");
@@ -883,6 +1065,106 @@
     }
   });
 
+  // ---------- court: decrees, wars, diplomacy ----------
+  const SCROLL = `<svg viewBox="0 0 24 24"><path d="M8 21h10a2 2 0 0 0 2-2v-1H10v1a2 2 0 0 1-4 0V5a2 2 0 0 0-2-2h12a2 2 0 0 1 2 2v13"/><path d="M10 8h5M10 12h5"/></svg>`;
+  const SWORDS = `<svg viewBox="0 0 24 24"><path d="M14.5 17.5L3 6V3h3l11.5 11.5M13 19l6-6M16 16l4 4M19 21l2-2"/><path d="M9.5 17.5L21 6V3h-3L6.5 14.5M11 19l-6-6M8 16l-4 4M5 21l-2-2"/></svg>`;
+  const activeWars = () => Object.entries(st.wars || {}).filter(([, w]) => !w.resolved);
+  function courtPills() {
+    const D = (st.decrees || {})[todayK()];
+    let out = "";
+    if (D) {
+      const done = D.items.filter(i => i.done).length, s = streak();
+      out += `<button class="pill court${D.all ? " ok" : ""}" data-open="decrees" title="Today's decrees">${SCROLL}<b>${done}/${D.items.length}</b> decrees${s ? ` · <span class="streak">${s}-day streak</span>` : ""}</button>`;
+    }
+    for (const [key, w] of activeWars()) {
+      const hrs = warHours(w), days = Math.round((kd(w.exam) - kd(todayK())) / 86400000);
+      const sub = ST.getSubjects()[w.sid];
+      out += `<button class="pill court war" data-open="war" data-key="${esc(key)}" title="Exam campaign">${SWORDS}vs ${esc(st.rivals[w.enemy - 1].name)} · ${esc(sub ? sub.name : "")} <b>${hrs.toFixed(1)}</b>/${w.goal}h · ${days}d</button>`;
+    }
+    return out;
+  }
+  function renderStrip() {
+    let el = $("empStrip");
+    const below = document.querySelector(".below");
+    if (!el && below) { el = document.createElement("div"); el.id = "empStrip"; el.className = "emp-strip link"; below.appendChild(el); el.onclick = () => open(); }
+    if (!el) return;
+    if (!st) { el.hidden = true; return; }
+    const D = (st.decrees || {})[todayK()];
+    const parts = [];
+    if (D) parts.push(D.items.map(i => { const s = i.sid ? ST.getSubjects()[i.sid] : null;
+      return `<span class="${i.done ? "done" : ""}">${i.done ? "✓ " : ""}${esc(s ? s.name : "Any subject")} ${i.done ? fmtH(i.secs) : fmtH(daySecs(todayK(), i.sid)) + "/" + fmtH(i.secs)}</span>`; }).join(" · ") + (streak() ? ` · ${streak()}-day streak` : ""));
+    for (const [, w] of activeWars()) parts.push(`<span class="war">War vs ${esc(st.rivals[w.enemy - 1].name)}: ${warHours(w).toFixed(1)}/${w.goal}h</span>`);
+    el.innerHTML = parts.length ? `${SCROLL}${parts.join(" · ")}` : "";
+    el.hidden = !parts.length;
+  }
+  $("empRes").addEventListener("click", e => {
+    const b = e.target.closest("[data-open]"); if (!b) return;
+    if (b.dataset.open === "decrees") showDecrees();
+    else showWar(b.dataset.key);
+  });
+  function showDecrees() {
+    const D = (st.decrees || {})[todayK()]; if (!D) return;
+    const subs = ST.getSubjects(), s = streak();
+    const week = Array.from({ length: 14 }, (_, i) => addDays(todayK(), i - 13));
+    modal(`<h2>Today's decrees</h2>
+      <p class="tip">Set each morning from your weekly targets — doing them keeps you on pace, so you're never raided. Each one pays ${25 + 5 * Math.min(10, s)} gold, and every day you complete them all adds +3% to all study gold (up to +30%).</p>
+      ${D.items.map(it => { const sec = daySecs(todayK(), it.sid), pct = Math.min(1, sec / it.secs), c = it.sid && subs[it.sid] ? subs[it.sid].color : "#d9d6d8";
+        return `<div class="dec ${it.done ? "done" : ""}"><i style="background:${c}"></i><span>${esc(decreeText(it))}</span><small>${it.done ? "fulfilled" : fmtH(sec) + " done"}</small>
+          <span class="w-bar wide"><span style="width:${pct * 100}%;background:${c}"></span></span></div>`; }).join("")}
+      <div class="streak-row">${week.map(d => { const x = (st.decrees || {})[d]; return `<i class="${x && x.all ? "on" : x ? "off" : ""}${d === todayK() ? " today" : ""}" title="${shortDate(d)}"></i>`; }).join("")}</div>
+      <p class="tip">${s ? `<b>${s}-day streak</b> — +${Math.round(streakBonus() * 100)}% gold on all study.` : "Complete all decrees today to start a streak."}</p>
+      <div class="m-actions"><button class="btn go" data-x>Close</button></div>`, e => { if (e.target.closest("[data-x]")) closeModal(); });
+  }
+  function showWar(key) {
+    const w = (st.wars || {})[key]; if (!w) return;
+    const sub = ST.getSubjects()[w.sid], hrs = warHours(w), days = Math.round((kd(w.exam) - kd(todayK())) / 86400000);
+    const total = Math.round((kd(w.exam) - kd(w.start)) / 86400000), gone = total - days;
+    const pace = w.goal * gone / total;
+    modal(`<h2>${SWORDS.replace("<svg", '<svg class="h-ico"')} War with ${esc(st.rivals[w.enemy - 1].name)}</h2>
+      <p class="tip">Your ${esc(sub ? sub.name : "")} exam is on <b>${shortDate(w.exam)}</b> (${days} day${days === 1 ? "" : "s"} left). Study <b>${w.goal}h</b> of ${esc(sub ? sub.name : "it")} between ${shortDate(w.start)} and the exam to win.</p>
+      <div class="war-bar"><span style="width:${Math.min(100, hrs / w.goal * 100)}%"></span><em style="left:${Math.min(100, pace / w.goal * 100)}%" title="Where you should be today"></em></div>
+      <p class="tip"><b>${hrs.toFixed(1)}h</b> of ${w.goal}h · ${hrs >= pace ? `<span class="good">ahead of pace</span>` : `<span class="bad">${(pace - hrs).toFixed(1)}h behind pace</span>`}</p>
+      <p class="tip"><b>Win:</b> take 3 of their provinces (5 if you reach ${Math.round(w.goal * 1.25)}h) and 150 gold.<br><b>Lose:</b> they take 3–6 of your border provinces (courthouses still get their 50% chance).</p>
+      <div class="m-actions"><button class="btn go" data-x>To arms</button></div>`, e => { if (e.target.closest("[data-x]")) closeModal(); });
+  }
+  function showWarNews() {
+    const news = Object.entries(st.wars || {}).filter(([, w]) => !w.seen);
+    if (!news.length || !$("empModal").hidden) return;
+    const [key, w] = news[0];
+    w.seen = true; save();
+    if (!w.resolved) { showWar(key); $("empCard").querySelector("h2").innerHTML = `${SWORDS.replace("<svg", '<svg class="h-ico"')} ${esc(st.rivals[w.enemy - 1].name)} declared war!`; return; }
+    const sub = ST.getSubjects()[w.sid];
+    if (w.won) ST.confetti && ST.confetti([st.color, "#f2c94c", "#ffffff"]);
+    modal(`<h2>${w.won ? "Victory!" : "Defeat"}</h2>
+      <p class="tip">${esc(sub ? sub.name : "")} exam campaign against ${esc(st.rivals[w.enemy - 1].name)}: <b>${w.hours}h</b> of ${w.goal}h.</p>
+      <p class="tip">${w.won ? `You took ${w.taken.length ? w.taken.map(esc).join(", ") : "their treasury"} and 150 gold. Good luck on the exam!`
+        : `They took ${w.lost.length ? w.lost.map(esc).join(", ") : "nothing — your courthouses held"}.${w.repelled && w.repelled.length ? " Courthouses held " + w.repelled.map(esc).join(", ") + "." : ""} Good luck on the exam anyway!`}</p>
+      <div class="m-actions"><button class="btn go" data-x>Onwards</button></div>`, e => { if (e.target.closest("[data-x]")) { closeModal(); showWarNews(); } });
+  }
+  function showDiplomacy() {
+    const sid = tradeSubject(), c = treatyCost(), have = sid ? Math.floor(st.pts[sid] || 0) : 0, sname = sid ? ST.getSubjects()[sid].name : "";
+    const E = ERAS[viewEra()], cols = rivalColors(E);
+    const rows = st.rivals.map((R, i) => {
+      const r = i + 1;
+      let size = 0; for (let p = 0; p < map.N; p++) if (st.owner[p] === r) size++;
+      if (!size) return `<div class="dip"><i style="background:${cols[i]}"></i><span>${esc(R.name)}<small>fallen</small></span></div>`;
+      const war = warWith(r), peace = atPeace(r), border = bordersYou(r);
+      const status = war ? `<em class="bad">At war</em>` : peace ? `<em class="good">Peace until ${shortDate(st.treaties[r])}</em>`
+        : `<button class="btn" data-treaty="${r}" ${sid && have >= c ? "" : "disabled"}>Sign peace · ${c} ${esc(sname || "French")}</button>`;
+      return `<div class="dip"><i style="background:${cols[i]}"></i><span>${esc(R.name)}<small>${size} provinces${border ? " · borders you" : ""}</small></span>${status}</div>`;
+    }).join("");
+    modal(`<h2>Diplomacy</h2>
+      <p class="tip">${sid ? `Spend ${esc(sname)} points on ${TREATY_WEEKS}-week peace treaties. A nation at peace won't raid you when you miss a target, but you can't conquer its land either. Each extra active treaty costs 50 more. You have <b>${have}</b> ${esc(sname)} points.`
+        : "Add a language subject (like French) to unlock diplomacy."} Exam wars cancel treaties with the enemy.</p>
+      <div class="dips">${rows}</div>
+      <div class="m-actions"><button class="btn go" data-x>Close</button></div>`, e => {
+      const t = e.target.closest("[data-treaty]");
+      if (t && !t.disabled) { signTreaty(+t.dataset.treaty); refresh(); showDiplomacy(); }
+      else if (e.target.closest("[data-x]")) closeModal();
+    });
+  }
+  $("empDipBtn").onclick = () => showDiplomacy();
+
   // ---------- modals ----------
   function modal(html, onClick) {
     $("empCard").innerHTML = html;
@@ -898,13 +1180,16 @@
         <li><i style="background:#56b4e9"></i><div><b>Each subject builds its own thing.</b> Minutes studied in a subject become that subject's points:
           Law builds <b>courthouses</b> (50% chance to repel raiders there; they cost twice as much), French builds <b>markets</b> (+5% gold each), TCM builds <b>healers</b> (+50% population). Other subjects build libraries.</div></li>
         <li><i style="background:#eb8c6a"></i><div><b>Miss a weekly target, get raided.</b> Every Monday each subject's target from last week is checked. Fall short and rival nations seize border provinces — 1 to 4, depending on how short you were. Your capital is always safe; courthouses give a 50% chance to hold. Hit a target and you get 20 gold tribute. Rivals also grab one free province each every week, so claim the wilds before they do.</div></li>
+        <li><i style="background:#d9d6d8"></i><div><b>Daily decrees.</b> Each day you get 1–2 tasks based on your weekly targets (e.g. "Law 2h20"). Each fulfilled decree pays gold, and every day you complete them all adds +3% to all study gold, up to +30% for a 10-day streak.</div></li>
+        <li><i style="background:#e0565b"></i><div><b>Exam campaigns.</b> Set an exam date for a subject (Progress → Subjects) and 4 weeks before it a rival declares war. Study that subject's weekly target × 4 weeks by exam day to win 3–5 of their provinces and 150 gold. Fall short and they take 3–6 of yours.</div></li>
+        <li><i style="background:#6fcf97"></i><div><b>Diplomacy.</b> French points buy 4-week peace treaties (handshake button). Nations at peace won't raid you, but you can't conquer them either.</div></li>
         <li><i style="background:#f2c94c"></i><div><b>Eras.</b> Total focus hours move history forward: Antiquity → Medieval (60h) → Renaissance (250h) → Industrial (600h) → Modern (1200h). At ~30h a week that's roughly a year of study. Each era redraws the map and renames your buildings. You can look back at earlier eras in settings.</div></li>
       </ul>
       <p class="tip">Tap a province to see it. Drag to move, pinch or scroll to zoom. The striped provinces are the ones you can claim next.</p>
       <div class="m-actions"><button class="btn go" data-x>Got it</button></div>`, e => { if (e.target.closest("[data-x]")) closeModal(); });
   }
   function showLog() {
-    const icon = { rival: "#bb86fc", raid: "#eb8c6a", good: "#6fcf97", claim: st.color, build: "#56b4e9", era: "#f2c94c" };
+    const icon = { war: "#e0565b", peace: "#6fcf97", rival: "#bb86fc", raid: "#eb8c6a", good: "#6fcf97", claim: st.color, build: "#56b4e9", era: "#f2c94c" };
     modal(`<h2>Chronicle</h2><div class="chron">${st.log.length ? st.log.map(l => `<div class="c-row"><i style="background:${icon[l.k] || "#888"}"></i><span>${esc(l.t)}</span><small>${shortDate(l.d)}</small></div>`).join("") : `<p class="tip">Nothing has happened yet. Study, then claim your first province.</p>`}</div>
       <div class="m-actions"><button class="btn" data-x>Close</button></div>`, e => { if (e.target.closest("[data-x]")) closeModal(); });
   }
@@ -1017,6 +1302,7 @@
     refresh();
     if (st.reports.some(r => !r.seen)) showReports();
     else if (st.pendingEra != null) showEraUnlock();
+    else showWarNews();
   }
 
   // ---------- open / close ----------
