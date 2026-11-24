@@ -787,6 +787,9 @@
     return +(r.by || {})[sid] || 0;
   };
   function makeDecrees(day) {
+    // if you made a weekly plan, today's decrees follow it
+    const planned = window.Tools && window.Tools.planFor ? window.Tools.planFor(day).filter(x => x.secs >= 600) : [];
+    if (planned.length) return { items: planned.sort((a, b) => b.secs - a.secs).slice(0, 2).map(x => ({ sid: x.sid, secs: Math.min(4 * 3600, x.secs), done: false })), all: false, fromPlan: true };
     const mon = weekOf(day), idx = Math.round((kd(day) - kd(mon)) / 86400000), left = 7 - idx;
     const items = [];
     for (const [sid, s] of ST.activeSubjects()) {
@@ -1755,6 +1758,7 @@
       save();
       $("empLoading").hidden = true;
       start();
+      sync(true);
       setTimeout(showHelp, 400);
     }, 30);
   }

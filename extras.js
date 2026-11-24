@@ -320,6 +320,8 @@
       <li><b>This week</b>: hours per subject against your weekly targets, per skill too. <b>Log time manually</b> adds study you did away from the timer.</li>
       <li><b>History</b> and <b>Notes</b>: past days and the notes you wrote after sessions.</li>
       <li><b>Subjects</b>: add or remove subjects, set a weekly target, an exam date, skills, and the subject's <b>role in your empire</b>.</li>
+      <li><b>Plan</b>: a weekly plan (fill it from your targets in one tap). The timer shows <b>Next up</b>, your empire's daily decrees follow it, and the <b>Exams</b> list tells you if you're on track.</li>
+      <li><b>Cards</b>: flashcards that come back just before you'd forget them. Make them yourself or from a session note — write <i>question :: answer</i> and both sides fill in. Review time counts as study time.</li>
       <li><b>Year</b>: a 12-month heatmap and streaks, a <b>monthly recap card</b> to save or share, and <b>study reminders</b> you add to your phone's calendar.</li>
     </ul>
     <h3>Your empire (castle button)</h3>
