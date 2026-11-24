@@ -425,10 +425,12 @@
     for (const p in st.bld) for (const sid in st.bld[p]) if (st.owner[p] === 0 && kindOf(sid) === kind) n++;
     return n;
   }
-  const goldMult = () => 1 + Math.min(.5, countKind("trade") * (tech("guilds") ? .07 : .05)) + (st && st.decrees ? streakBonus() : 0)
+  const merchantPeace = () => st && st.rivals ? st.rivals.filter((R, i) => persona(i + 1) === "merchant" && atPeace(i + 1)).length * .05 : 0;
+  const seasonVal = k => { const s = st ? season() : null; return s && s[k] || 0; };
+  const goldMult = () => 1 + seasonVal("gold") + merchantPeace() + Math.min(.5, countKind("trade") * (tech("guilds") ? .07 : .05)) + (st && st.decrees ? streakBonus() : 0)
     + (tech("banking") ? .1 : 0) + (tech("internet") ? .15 : 0) + (wonderDone("trade") ? .15 : 0)
     + Math.min(.6, countKind("math") * .06) + (wonderDone("math") ? .2 : 0);
-  const ptsMult = () => 1 + (tech("printing") ? .1 : 0) + (wonderDone("learn") ? .1 : 0) + Math.min(.3, countKind("learn") * .03);
+  const ptsMult = () => 1 + seasonVal("pts") + (tech("printing") ? .1 : 0) + (wonderDone("learn") ? .1 : 0) + Math.min(.3, countKind("learn") * .03);
   const techDiscount = () => Math.min(.48, countKind("science") * .08) + (wonderDone("science") ? .25 : 0);
   const repelChance = () => Math.min(.85, .5 + (tech("fortify") ? .1 : 0) + (wonderDone("law") ? .25 : 0));
   function provPop(p) {
@@ -441,7 +443,8 @@
   const fmtPop = n => n >= 1e6 ? (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + "M" : Math.round(n / 1000) + "k";
   function claimCost(p) {
     let c = (40 + 10 * (ownedList().length - 1)) * TERRAIN[map.P[p].t].cost * (tech("survey") ? .9 : 1) * (tech("rail") ? .85 : 1);
-    if (st.owner[p] > 0) c *= 1.5;
+    if (st.owner[p] > 0) c *= persona(st.owner[p]) === "peaceful" ? 1.25 : 1.5;
+    const se = season(); if (se && se.claim) c *= se.claim;
     return Math.round(c);
   }
   function buildCost(sid) {
@@ -540,9 +543,13 @@
       const r = i + 1, opts = [];
       for (let p = 0; p < map.N; p++) if (st.owner[p] === r) for (const n of map.P[p].nb) if (st.owner[n] === -1 && !opts.includes(n)) opts.push(n);
       if (!opts.length) return;
-      const p = opts[Math.floor(rand() * opts.length)];
-      st.owner[p] = r;
-      took.push({ p, by: R.name });
+      const kind = persona(r);
+      if (kind === "peaceful" && ((kd(w).getTime() / 604800000) | 0) % 2) return;   // grows every other week
+      for (let n = kind === "expansionist" ? 2 : 1; n > 0 && opts.length; n--) {
+        const i = Math.floor(rand() * opts.length), p = opts.splice(i, 1)[0];
+        st.owner[p] = r;
+        took.push({ p, by: R.name });
+      }
     });
     if (took.length) {
       rep.grew = took;
@@ -565,6 +572,7 @@
       if (lost.length) logEvent(`Week of ${shortDate(w)}: ${SUBJ()[sid].name} target missed (${done.toFixed(1)}/${s.target}h) — lost ${lost.map(l => map.P[l.p].name).join(", ")}${held}`, "raid");
       else logEvent(`Week of ${shortDate(w)}: ${SUBJ()[sid].name} target missed, but ${shielded ? "your courthouses repelled every raid" : "there was nothing to take"}`, "raid");
     }
+    if (subs.length && rep.lines.length && rep.lines.every(l => l.ok)) st.perfectWeeks = (st.perfectWeeks || 0) + 1;
     if (rep.tribute) { st.gold += rep.tribute; logEvent(`Week of ${shortDate(w)}: targets met — +${rep.tribute} gold tribute`, "good"); }
     st.reports.push(rep);
     st.reports = st.reports.slice(-6);
@@ -600,6 +608,96 @@
     return { lost, repelled };
   }
 
+  // ---------- achievements ----------
+  const ACH = [
+    ["h1", "First hour", "Study for 1 hour in total", () => hoursAll() >= 1],
+    ["h10", "Getting serious", "10 hours of study", () => hoursAll() >= 10],
+    ["h50", "Dedicated", "50 hours of study", () => hoursAll() >= 50],
+    ["h100", "Centurion", "100 hours of study", () => hoursAll() >= 100],
+    ["h250", "Scholar", "250 hours of study", () => hoursAll() >= 250],
+    ["h500", "Master", "500 hours of study", () => hoursAll() >= 500],
+    ["h1000", "Legend", "1,000 hours of study", () => hoursAll() >= 1000],
+    ["day6", "Marathon day", "6 hours of study in one day", () => bestDay() >= 6],
+    ["day9", "Iron will", "9 hours of study in one day", () => bestDay() >= 9],
+    ["p10", "Growing realm", "Rule 10 provinces", () => ownedList().length >= 10],
+    ["p30", "Empire builder", "Rule 30 provinces", () => ownedList().length >= 30],
+    ["p70", "Conqueror of the continent", "Rule 70 provinces", () => ownedList().length >= 70],
+    ["conq", "First conquest", "Take a province from a rival nation", () => (st.conquests || 0) >= 1],
+    ["b10", "Builder", "Raise 10 buildings", () => Object.values(st.bld).reduce((a, b) => a + Object.keys(b).length, 0) >= 10],
+    ["s7", "Week of discipline", "Fulfil every decree 7 days in a row", () => streak() >= 7],
+    ["s30", "Unbreakable", "Fulfil every decree 30 days in a row", () => streak() >= 30],
+    ["perfect", "Perfect week", "Hit every weekly target in one week", () => (st.perfectWeeks || 0) >= 1],
+    ["perfect4", "Perfect month", "Four perfect weeks", () => (st.perfectWeeks || 0) >= 4],
+    ["war", "Victorious", "Win an exam campaign", () => (st.trophies || []).some(t => t.won)],
+    ["war3", "Warlord", "Win three exam campaigns", () => (st.trophies || []).filter(t => t.won).length >= 3],
+    ["peace", "Diplomat", "Sign a peace treaty", () => Object.keys(st.treaties || {}).length >= 1],
+    ["tech5", "Inventive", "Make 5 discoveries", () => Object.keys(st.techs || {}).length >= 5],
+    ["wonder", "Wonder of the world", "Complete a wonder", () => Object.keys(WONDERS).some(wonderDone)],
+    ["era1", "Middle Ages", "Reach the Medieval era", () => eraIdx() >= 1],
+    ["era2", "Rebirth", "Reach the Renaissance", () => eraIdx() >= 2],
+    ["era3", "Age of steam", "Reach the Industrial era", () => eraIdx() >= 3],
+    ["era4", "Modern times", "Reach the Modern era", () => eraIdx() >= 4],
+  ];
+  const hoursAll = () => totals().all / 3600;
+  function bestDay() { const h = ST.getHistory(); let m = 0; for (const k in h) m = Math.max(m, +h[k].f || 0); return m / 3600; }
+  function checkAchievements(silent) {
+    st.ach = st.ach || {};
+    const fresh = [];
+    for (const [id, name, , test] of ACH) {
+      if (st.ach[id]) continue;
+      let ok = false; try { ok = test(); } catch (e) {}
+      if (!ok) continue;
+      st.ach[id] = todayK(); st.gold += 50; fresh.push(name);
+      logEvent(`Achievement: ${name} (+50 gold)`, "good");
+    }
+    if (fresh.length && !silent) {
+      ST.toast(fresh.length === 1 ? `Achievement unlocked: ${fresh[0]} · +50 gold` : `${fresh.length} achievements unlocked · +${fresh.length * 50} gold`, "#f2c94c");
+      ST.confetti && ST.confetti(["#f2c94c", "#ffffff", st.color]);
+    }
+  }
+  function showTrophies() {
+    const got = st.ach || {}, n = ACH.filter(a => got[a[0]]).length;
+    const wars = (st.trophies || []).slice().reverse();
+    modal(`${realmTabs("tro")}<p class="tip"><b>${n}</b> of ${ACH.length} achievements · each one pays 50 gold.</p>
+      <div class="ach-grid">${ACH.map(([id, name, desc]) => `<div class="ach ${got[id] ? "got" : ""}"><b>${got[id] ? "★" : "☆"} ${esc(name)}</b><small>${esc(desc)}${got[id] ? " · " + shortDate(got[id]) : ""}</small></div>`).join("")}</div>
+      ${wars.length ? `<h3 class="t-head" style="margin-top:16px">Exam campaigns</h3>${wars.map(t => `<div class="tech"><span><b>${t.won ? "Victory" : "Defeat"} vs ${esc(t.enemy)}</b><small>${esc(t.name)} exam · ${shortDate(t.exam)} · ${t.hours}/${t.goal}h</small></span><em class="${t.won ? "good" : "bad"}">${t.won ? "won" : "lost"}</em></div>`).join("")}` : ""}
+      <div class="m-actions"><button class="btn go" data-x>Close</button></div>`, e => { if (tabClick(e)) return; if (e.target.closest("[data-x]")) closeModal(); });
+  }
+
+  // ---------- rival personalities (fixed per map) ----------
+  const PERS = {
+    warlike:      { label: "Warlike", desc: "Peace costs 50% more; first to declare exam wars" },
+    expansionist: { label: "Expansionist", desc: "Grabs two free provinces a week" },
+    merchant:     { label: "Merchants", desc: "Peace costs 40% less; +5% gold while at peace with them" },
+    peaceful:     { label: "Peaceful", desc: "Grows slowly, rarely goes to war; their land costs only 25% extra" },
+  };
+  let persCache = null;
+  function persona(r) {
+    if (!persCache || persCache.seed !== st.seed) {
+      const rand = mulberry32(st.seed ^ 0x7e1a), list = ["warlike", "expansionist", "merchant", "peaceful", "warlike", "merchant"];
+      for (let i = list.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [list[i], list[j]] = [list[j], list[i]]; }
+      persCache = { seed: st.seed, list };
+    }
+    return persCache.list[(r - 1) % 6];
+  }
+
+  // ---------- seasons: bonus weeks on the calendar ----------
+  const SEASONS = [
+    { id: "newyear", name: "New Year festival", from: "12-28", to: "01-04", effect: "+25% gold from all study", gold: .25 },
+    { id: "exams1", name: "Winter exam season", from: "01-05", to: "01-31", effect: "Decree rewards doubled", decree: 2 },
+    { id: "spring", name: "Spring renewal", from: "03-20", to: "04-05", effect: "Claiming land 20% cheaper", claim: .8 },
+    { id: "exams2", name: "Summer exam season", from: "05-20", to: "06-30", effect: "Decree rewards doubled", decree: 2 },
+    { id: "harvest", name: "Harvest festival", from: "09-20", to: "10-10", effect: "+20% subject points from all study", pts: .2 },
+  ];
+  function season(k = todayK()) {
+    const md = k.slice(5);
+    const s = SEASONS.find(x => x.from <= x.to ? md >= x.from && md <= x.to : md >= x.from || md <= x.to);
+    if (s) return s;
+    // your own exam week: an exam within 7 days
+    for (const [, x] of ST.activeSubjects()) if (x.exam && x.exam >= k && x.exam <= addDays(k, 7)) return { id: "examweek", name: "Your exam week", effect: "+20% gold from all study", gold: .2 };
+    return null;
+  }
+
   // ---------- spies: with a spy network, see which provinces raiders would hit if the week ended now ----------
   function spyTargets() {
     if (!st || !countKind("listen")) return [];
@@ -622,7 +720,7 @@
   const treatyWeeks = () => (tech("telegraph") ? 6 : TREATY_WEEKS) + Math.min(3, countKind("write")) + (wonderDone("write") ? 2 : 0);
   const atPeace = (r, day) => !!(st.treaties && st.treaties[r] && st.treaties[r] > (day || todayK()));
   const activeTreaties = () => Object.keys(st.treaties || {}).filter(r => atPeace(+r)).length;
-  const treatyCost = () => Math.round((150 + 50 * activeTreaties()) * (1 - Math.min(.45, countKind("write") * .15)));
+  const treatyCost = r => Math.round((150 + 50 * activeTreaties()) * (1 - Math.min(.45, countKind("write") * .15)) * ({ warlike: 1.5, merchant: .6 }[r ? persona(r) : ""] || 1));
   function tradeSubject() {
     const t = UNITS().filter(([id]) => kindOf(id) === "trade" || kindOf(id) === "write");
     t.sort((a, b) => (st.pts[b[0]] || 0) - (st.pts[a[0]] || 0));
@@ -634,7 +732,7 @@
   }
   function warWith(r) { return Object.values(st.wars || {}).find(w => !w.resolved && w.enemy === r); }
   function signTreaty(r) {
-    const sid = tradeSubject(), c = treatyCost();
+    const sid = tradeSubject(), c = treatyCost(r);
     if (!sid || (st.pts[sid] || 0) < c || atPeace(r) || warWith(r)) return;
     st.pts[sid] -= c;
     st.treaties = st.treaties || {};
@@ -824,7 +922,7 @@
       for (const it of D.items) {
         if (it.done || daySecs(d, it.sid) < it.secs) continue;
         it.done = true;
-        const reward = Math.round((25 + 5 * Math.min(10, streak())) * (tech("monastery") ? 2 : 1) * (wonderDone("arts") ? 1.5 : 1));
+        const reward = Math.round((25 + 5 * Math.min(10, streak())) * (tech("monastery") ? 2 : 1) * (wonderDone("arts") ? 1.5 : 1) * (seasonVal("decree") || 1));
         st.gold += reward;
         if (!silent && d === today) setTimeout(() => ST.toast(`Decree fulfilled: ${decreeText(it)} · +${reward} gold`, "#f2c94c"), 900);
       }
@@ -878,7 +976,7 @@
       let border = 0, size = 0;
       for (let p = 0; p < map.N; p++) if (st.owner[p] === r) { size++; if (map.P[p].nb.some(n => st.owner[n] === 0)) border++; }
       if (!size) return;
-      const sc = border * 10 + size;
+      const sc = border * 10 + size + ({ warlike: 1000, peaceful: -1000 }[persona(r)] || 0);
       if (sc > bs) { bs = sc; best = r; }
     });
     return best;
@@ -933,6 +1031,7 @@
     if (map || (st.wars && Object.keys(st.wars).length) || ST.activeSubjects().some(([, s]) => s.exam)) { ensureMap(); updateWars(); }
     updateDecrees(silent);
     if (st.founded < weekOf(todayK())) { ensureMap(); updateEvents(); }
+    if (map) checkAchievements(silent && !st.ach);
     if (JSON.stringify(st) !== before) save();
     renderStrip();
     checkEra();
@@ -1446,7 +1545,7 @@
       body += `<p class="s-note">Not on your border yet — expand towards it first.</p>`;
     }
     sh.innerHTML = `<div class="s-head"><div><div class="s-name">${esc(P.name)}</div>
-      <div class="s-meta">${TERRAIN[P.t].label}${P.coastal ? " · Coast" : ""} · <span style="color:${o === 0 ? st.color : o > 0 ? rivalColors(ERAS[era])[(o - 1) % 6] : "inherit"}">${ownerName}</span></div></div>
+      <div class="s-meta">${TERRAIN[P.t].label}${P.coastal ? " · Coast" : ""} · <span style="color:${o === 0 ? st.color : o > 0 ? rivalColors(ERAS[era])[(o - 1) % 6] : "inherit"}">${ownerName}</span>${o > 0 ? ` · <em class="pers" title="${esc(PERS[persona(o)].desc)}">${PERS[persona(o)].label}</em>` : ""}</div></div>
       <button class="eb sm" id="sheetX" title="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>${body}`;
     sh.hidden = false;
   }
@@ -1459,6 +1558,7 @@
       if (!isClaimable(p) || st.gold < c || (st.owner[p] > 0 && atPeace(st.owner[p]))) return;
       const was = st.owner[p];
       st.gold -= c; st.owner[p] = 0;
+      if (was > 0) st.conquests = (st.conquests || 0) + 1;
       logEvent(`${was > 0 ? "Conquered" : "Claimed"} ${map.P[p].name}${was > 0 ? " from " + st.rivals[was - 1].name : ""}`, "claim");
       save();
       ST.toast(`${map.P[p].name} is yours`, st.color);
@@ -1500,6 +1600,8 @@
   function courtPills() {
     const D = (st.decrees || {})[todayK()];
     let out = "";
+    const se = season();
+    if (se) out += `<span class="pill court season" title="${esc(se.effect)}">✦ ${esc(se.name)} · ${esc(se.effect)}</span>`;
     if (D) {
       const done = D.items.filter(i => i.done).length, s = streak();
       out += `<button class="pill court${D.all ? " ok" : ""}" data-open="decrees" title="Today's decrees">${SCROLL}<b>${done}/${D.items.length}</b> decrees${s ? ` · <span class="streak">${s}-day streak</span>` : ""}</button>`;
@@ -1577,19 +1679,19 @@
       <div class="m-actions"><button class="btn go" data-x>Onwards</button></div>`, e => { if (e.target.closest("[data-x]")) { closeModal(); showWarNews(); } });
   }
   function showDiplomacy() {
-    const sid = tradeSubject(), c = treatyCost(), have = sid ? Math.floor(st.pts[sid] || 0) : 0, sname = sid ? SUBJ()[sid].name : "";
+    const sid = tradeSubject(), have = sid ? Math.floor(st.pts[sid] || 0) : 0, sname = sid ? SUBJ()[sid].name : "";
     const E = ERAS[viewEra()], cols = rivalColors(E);
     const rows = st.rivals.map((R, i) => {
       const r = i + 1;
       let size = 0; for (let p = 0; p < map.N; p++) if (st.owner[p] === r) size++;
       if (!size) return `<div class="dip"><i style="background:${cols[i]}"></i><span>${esc(R.name)}<small>fallen</small></span></div>`;
-      const war = warWith(r), peace = atPeace(r), border = bordersYou(r);
+      const war = warWith(r), peace = atPeace(r), border = bordersYou(r), c = treatyCost(r), P = PERS[persona(r)];
       const status = war ? `<em class="bad">At war</em>` : peace ? `<em class="good">Peace until ${shortDate(st.treaties[r])}</em>`
         : `<button class="btn" data-treaty="${r}" ${sid && have >= c ? "" : "disabled"}>Sign peace · ${c} ${esc(sname || "French")}</button>`;
-      return `<div class="dip"><i style="background:${cols[i]}"></i><span>${esc(R.name)}<small>${size} provinces${border ? " · borders you" : ""}</small></span>${status}</div>`;
+      return `<div class="dip"><i style="background:${cols[i]}"></i><span>${esc(R.name)} <em class="pers" title="${esc(P.desc)}">${P.label}</em><small>${size} provinces${border ? " · borders you" : ""} · ${esc(P.desc)}</small></span>${status}</div>`;
     }).join("");
     modal(`${realmTabs("dip")}
-      <p class="tip">${sid ? `Spend ${esc(sname)} points on ${treatyWeeks()}-week peace treaties. A nation at peace won't raid you when you miss a target, but you can't conquer its land either. Each extra active treaty costs 50 more. You have <b>${have}</b> ${esc(sname)} points.`
+      <p class="tip">${sid ? `Spend ${esc(sname)} points on ${treatyWeeks()}-week peace treaties. A nation at peace won't raid you when you miss a target, but you can't conquer its land either. Each extra active treaty costs 50 more; warlike nations charge more, merchants less. You have <b>${have}</b> ${esc(sname)} points.`
         : "Add a language subject (like French) to unlock diplomacy."} Exam wars cancel treaties with the enemy.</p>
       <div class="dips">${rows}</div>
       <div class="m-actions"><button class="btn go" data-x>Close</button></div>`, e => {
@@ -1600,12 +1702,13 @@
     });
   }
   let realmTab = "won";
-  const realmTabs = cur => `<div class="rtabs">${[["won", "Wonders"], ["tech", "Technology"], ["dip", "Diplomacy"]].map(([k, l]) => `<button class="${k === cur ? "on" : ""}" data-tab="${k}">${l}</button>`).join("")}</div>`;
+  const realmTabs = cur => `<div class="rtabs">${[["won", "Wonders"], ["tech", "Tech"], ["dip", "Diplomacy"], ["tro", "Trophies"]].map(([k, l]) => `<button class="${k === cur ? "on" : ""}" data-tab="${k}">${l}</button>`).join("")}</div>`;
   function tabClick(e) { const t = e.target.closest("[data-tab]"); if (!t) return false; showRealm(t.dataset.tab); return true; }
   function showRealm(tab) {
     realmTab = tab;
     if (tab === "dip") return showDiplomacy();
     if (tab === "tech") return showTech();
+    if (tab === "tro") return showTrophies();
     showWonders();
   }
   function showWonders() {
@@ -1664,6 +1767,9 @@
         <li><i style="background:#6fcf97"></i><div><b>Diplomacy</b> (crown button → Diplomacy). Points from a language or writing subject buy peace treaties (4 weeks, longer with chanceries). Nations at peace won't raid you, but you can't conquer them either. Exam wars cancel the treaty with the enemy.</div></li>
         <li><i style="background:#bb86fc"></i><div><b>The realm</b> (crown button). <b>Wonders</b>: one great project per subject, 40 hours of its points, with a permanent bonus. <b>Technology</b>: three discoveries per era. <b>Weekly events</b>: most weeks bring a plague, a trade boom, unrest or visiting scholars — study the named subject enough that week to come out ahead.</div></li>
         <li><i style="background:#f2c94c"></i><div><b>Eras.</b> Total focus hours move history forward: Antiquity → Medieval (60h) → Renaissance (250h) → Industrial (600h) → Modern (1200h). At ~30h a week that's roughly a year of study. Each era redraws the map and renames your buildings. You can look back at earlier eras in settings.</div></li>
+        <li><i style="background:#bb86fc"></i><div><b>Rival nations have personalities.</b> Warlike ones charge more for peace and start exam wars first; expansionists grab two free provinces a week; merchants sell cheap peace and pay you +5% gold while it lasts; peaceful ones grow slowly and their land is cheaper to take.</div></li>
+        <li><i style="background:#f2c94c"></i><div><b>Seasons.</b> New Year (+25% gold), winter and summer exam seasons (double decree rewards), spring (cheaper land), harvest (+20% points) — and your own exam week gives +20% gold.</div></li>
+        <li><i style="background:#f2c94c"></i><div><b>Achievements</b> (crown → Trophies): 27 milestones, each worth 50 gold, plus a record of every exam campaign.</div></li>
         <li><i style="background:#e0565b"></i><div><b>Spies.</b> With a spy network (from a listening subject or skill), provinces raiders would hit if the week ended now get a pulsing red ring, and Border watch names them.</div></li>
         <li><i style="background:#888"></i><div><b>Chronicle</b> (scroll button) lists everything that happened, and <b>Replay your history</b> plays back your borders over time.</div></li>
       </ul>

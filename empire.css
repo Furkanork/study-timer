@@ -221,3 +221,11 @@ body.empire-open { cursor: auto !important; }
 .replay-btn { display: inline-flex; align-items: center; gap: 7px; margin-bottom: 12px; }
 .replay-btn svg { width: 14px; height: 14px; fill: currentColor; }
 .w-spy { width: 100%; text-align: center; color: #f19a83; font-weight: 600; }
+.emp .pill.court.season { border-color: rgba(242,201,76,.5); color: #f6dd8e; cursor: default; }
+.emp em.pers, .emp-card em.pers { font-style: normal; font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 1px 6px; border-radius: 6px; background: rgba(187,134,252,.15); color: #cdb3f5; vertical-align: 1px; }
+.ach-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+.ach { border: 1px solid rgba(255,255,255,.07); border-radius: 12px; padding: 9px 10px; opacity: .55; }
+.ach.got { opacity: 1; border-color: rgba(242,201,76,.4); background: rgba(242,201,76,.06); }
+.ach b { display: block; font-size: 13px; color: #f3f1f2; }
+.ach.got b { color: #f2c94c; }
+.ach small { font-size: 11.5px; color: #8d8a8c; }
