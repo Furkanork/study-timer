@@ -330,6 +330,7 @@
     <ul>
       <li><b>Sign in</b> (bottom of this panel) with Google or email to have the same hours, subjects, notes and empire on every device.</li>
       <li>Without signing in, everything stays on this device; <b>Save / Load backup file</b> moves it by hand.</li>
+      <li><b>Import old data</b> brings hours and notes from the old claude.ai link or the Study Timer file on your Desktop — it's merged in, never counted twice.</li>
       <li>Add the page to your home screen to use it like an app; it keeps working offline.</li>
     </ul>
     <h3>Keyboard</h3>

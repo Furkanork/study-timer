@@ -608,6 +608,7 @@
       <div class="backup">
         <button class="btn" id="bkExport">Save backup file</button>
         <button class="btn" id="bkImport">Load backup file</button>
+        <button class="btn" id="bkMerge">Import old data</button>
         <input type="file" id="bkFile" accept=".json,application/json" hidden>
       </div>
       <div class="backup-msg" id="bkMsg"></div>
@@ -694,7 +695,11 @@
   let subjects = {};
   {
     let raw = store.get("subjects", null);
-    if (!raw) { raw = SEED; for (const id in raw) raw[id].created = Date.now(); }
+    if (!raw) {
+      const hist = store.get("history", {});
+      raw = hist && Object.keys(hist).length ? SEED : {};      // brand-new users get the welcome flow instead
+      for (const id in raw) raw[id].created = Date.now();
+    }
     for (const id in raw) { const c = cleanSubj(raw[id]); if (c && ID_RE.test(id)) subjects[id] = c; }
   }
   function activeSubjects() {
@@ -2102,6 +2107,76 @@
   });
 
   // ---------- hooks for the empire (empire.js) ----------
+  // add a subject from code (welcome flow); returns its id
+  function createSubject(o) {
+    const id = "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+    const used = new Set(activeSubjects().map(([, s]) => s.color));
+    const color = PALETTE.find(c => !used.has(c)) || PALETTE[Object.keys(subjects).length % PALETTE.length];
+    const order = Math.max(-1, ...Object.values(subjects).map(s => s.order)) + 1;
+    const c = cleanSubj(Object.assign({ name: "Subject", color, target: 0, order, archived: false, updated: Date.now(), created: Date.now() }, o));
+    subjects[id] = c;
+    store.set("subjects", subjects);
+    scheduleSettingsSync();
+    if (!validSubj(currentSubj) || currentSubj === NONE) setSubject(id); else renderMeta();
+    return id;
+  }
+  // merge old data (a backup file) into this device without double-counting what your other devices already have
+  function importMerge(data) {
+    const parse = k => { try { return JSON.parse(data["studyTimer." + k] || "null"); } catch (e) { return null; } };
+    const H = parse("history") || {}, N = parse("notes") || {}, SB = parse("subjects") || {};
+    let days = 0, nNotes = 0, nSubj = 0;
+    // match imported subjects to existing ones by id, then by name; add the rest
+    const idMap = {};
+    const byName = {}; for (const id in subjects) byName[subjects[id].name.trim().toLowerCase()] = id;
+    for (const id in SB) {
+      if (!ID_RE.test(id)) continue;
+      const c = cleanSubj(SB[id]); if (!c) continue;
+      const same = subjects[id] ? id : byName[c.name.trim().toLowerCase()];
+      if (same) { idMap[id] = same; continue; }
+      subjects[id] = c; idMap[id] = id; byName[c.name.trim().toLowerCase()] = id; nSubj++;
+    }
+    const mapId = sid => idMap[sid] || sid;
+    for (const k in H) {
+      const v = H[k];
+      if (!isKey(k) || !v || typeof v !== "object") continue;
+      const o = others[k] || {}, r = rec(k);
+      let changed = false;
+      const top = (have, want) => Math.max(0, (+want || 0) - have);
+      const df = top((+r.f || 0) + (+o.f || 0), v.f);
+      if (df >= 1) { r.f = (+r.f || 0) + df; changed = true; }
+      const ds = top((+r.s || 0) + (+o.s || 0), v.s);
+      if (ds >= 1) r.s = (+r.s || 0) + ds;
+      for (const src in (v.by || {})) {
+        if (!ID_RE.test(src)) continue;
+        const sid = mapId(src);
+        const d = top((+r.by[sid] || 0) + (+((o.by || {})[sid]) || 0), v.by[src]);
+        if (d >= 1) { r.by[sid] = (+r.by[sid] || 0) + d; changed = true; }
+      }
+      for (const src in (v.sk || {})) for (const sk in (v.sk[src] || {})) {
+        const sid = mapId(src);
+        const mine = ((r.sk || {})[sid] || {})[sk] || 0, oth = (((o.sk || {})[sid]) || {})[sk] || 0;
+        const d = top(mine + oth, v.sk[src][sk]);
+        if (d >= 1) { ((r.sk = r.sk || {})[sid] = r.sk[sid] || {})[sk] = mine + d; }
+      }
+      if (changed) days++;
+    }
+    for (const k in N) {
+      if (!isKey(k) || !Array.isArray(N[k])) continue;
+      const have = (notes[k] || []).concat(otherNotes[k] || []);
+      N[k].forEach(e => {
+        const c = cleanNote(e); if (!c) return;
+        c.sid = mapId(c.sid);
+        if (have.some(x => (c.id && x.id === c.id) || (x.t === c.t && x.at === c.at))) return;
+        (notes[k] = notes[k] || []).push(c); nNotes++;
+        dirtyMonths.add(k.slice(0, 7));
+      });
+    }
+    saveHistory();
+    store.set("notes", notes); store.set("notesDirty", [...dirtyMonths]); scheduleNotesSync();
+    if (nSubj) { store.set("subjects", subjects); scheduleSettingsSync(); }
+    renderMeta(); refreshPanel();
+    return { days, notes: nNotes, subjects: nSubj };
+  }
   // history from this device plus your other signed-in devices
   function combinedHistory() {
     const out = {};
@@ -2119,6 +2194,7 @@
   window.StudyTimer = { getHistory: combinedHistory, getSubjects: () => subjects, activeSubjects, toast, confetti,
     startSync: initSync, pushEmpire, syncState: () => syncState, serverSeen: () => serverSeen, renderSyncNote,
     // per-device histories, so devices that haven't loaded yet aren't mistaken for deleted time
+    createSubject, importMerge, openPanel, closePanel,
     deviceHistories: () => Object.assign({ ["dev-" + deviceId]: history }, othersBy),
     // true once we have the full picture (or there's no account sync to wait for)
     syncReady: () => !window.FIREBASE_CONFIG || serverSeen || (!store.get("signedIn", false) && window.__fbAuth !== "pending") };
@@ -2132,6 +2208,7 @@
 </script>
 <script src="empire.js"></script>
 <script src="extras.js"></script>
+<script src="onboarding.js"></script>
 <script src="firebase-config.js"></script>
 <script type="module" src="firebase-sync.js"></script>
 </body>

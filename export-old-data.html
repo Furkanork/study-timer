@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Export old Study Timer data</title>
+<style>
+  body { margin: 0; min-height: 100vh; background: #0b0b0b; color: #eceaeb; font-family: Inter, "Helvetica Neue", Arial, sans-serif; display: flex; align-items: center; justify-content: center; padding: 20px; box-sizing: border-box; }
+  .card { width: min(560px, 100%); background: #151414; border: 1px solid rgba(255,255,255,.1); border-radius: 20px; padding: 24px; }
+  h1 { font-size: 22px; margin: 0 0 8px; } p { color: #b9b6b8; line-height: 1.55; font-size: 14px; }
+  button { background: #eceaeb; color: #0b0b0b; border: 0; border-radius: 12px; padding: 10px 16px; font-size: 14px; font-weight: 700; cursor: pointer; margin-right: 8px; }
+  button.alt { background: rgba(255,255,255,.08); color: #eceaeb; }
+  textarea { width: 100%; box-sizing: border-box; height: 110px; margin-top: 12px; background: #0b0b0b; color: #b9b6b8; border: 1px solid rgba(255,255,255,.1); border-radius: 10px; padding: 8px; font-size: 11px; }
+  .bad { color: #f19a83; } .good { color: #6fcf97; }
+</style></head><body><div class="card">
+<h1>Export old Study Timer data</h1>
+<p id="msg">Looking for timer data saved in this browser…</p>
+<div id="act" hidden><button id="save">Save file</button><button class="alt" id="copy">Copy text</button><textarea id="txt" readonly></textarea>
+<p>Then open the new Study Timer → Progress → <b>Import old data</b>, and choose the saved file or paste the text.</p></div>
+</div>
+<script>
+  const data = {};
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith("studyTimer.") && k !== "studyTimer.device") data[k] = localStorage.getItem(k);
+  }
+  let days = 0; try { days = Object.keys(JSON.parse(data["studyTimer.history"] || "{}")).length; } catch (e) {}
+  const msg = document.getElementById("msg");
+  if (!days && !data["studyTimer.notes"]) {
+    msg.innerHTML = '<span class="bad">No timer data found in this browser.</span> Open this page in the same browser you used for the old Study Timer file (e.g. Chrome), from a file on your computer — not from the internet.';
+  } else {
+    const text = JSON.stringify({ app: "study-timer", version: 1, saved: new Date().toISOString(), source: "desktop-file", data });
+    msg.innerHTML = '<span class="good">Found ' + days + ' day' + (days === 1 ? '' : 's') + ' of study.</span> Save it as a file (or copy the text):';
+    document.getElementById("act").hidden = false;
+    document.getElementById("txt").value = text;
+    document.getElementById("save").onclick = () => { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([text], { type: "application/json" })); a.download = "study-timer-old-data.json"; document.body.appendChild(a); a.click(); a.remove(); };
+    document.getElementById("copy").onclick = () => { const t = document.getElementById("txt"); t.select(); try { navigator.clipboard.writeText(text); } catch (e) { document.execCommand("copy"); } document.getElementById("copy").textContent = "Copied"; };
+  }
+</script></body></html>
