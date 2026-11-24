@@ -28,6 +28,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Cinzel:wght@700&family=IM+Fell+English+SC&family=Cormorant+Garamond:wght@600;700&family=Oswald:wght@500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="empire.css">
 <link rel="stylesheet" href="extras.css">
+<link rel="stylesheet" href="look.css">
 <style>
   :root {
     --bg: #050505;
@@ -2220,6 +2221,8 @@
     startSync: initSync, pushEmpire, syncState: () => syncState, serverSeen: () => serverSeen, renderSyncNote,
     // per-device histories, so devices that haven't loaded yet aren't mistaken for deleted time
     createSubject, importMerge, openPanel, closePanel, pushDoc, logStudy, examInfo, setSubject,
+    timerState: () => ({ remaining: endAt ? Math.max(0, (endAt - Date.now()) / 1000) : remaining, total, running: !!endAt, mode }),
+    toggleTimer: () => { endAt ? pause() : start(); wake(); },
     getNotes: () => { const o = {}; for (const src of [notes, otherNotes]) for (const k in src) (o[k] = o[k] || []).push(...(src[k] || [])); return o; },
     currentSubject: () => currentSubj, todaySecs: sid => dayFocus(today(), sid), subjTotal,
     deviceHistories: () => Object.assign({ ["dev-" + deviceId]: history }, othersBy),
@@ -2237,6 +2240,7 @@
 <script src="extras.js"></script>
 <script src="onboarding.js"></script>
 <script src="tools.js"></script>
+<script src="look.js"></script>
 <script src="firebase-config.js"></script>
 <script type="module" src="firebase-sync.js"></script>
 </body>

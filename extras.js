@@ -335,8 +335,13 @@
       <li><b>Import old data</b> brings hours and notes from the old claude.ai link or the Study Timer file on your Desktop — it's merged in, never counted twice.</li>
       <li>Add the page to your home screen to use it like an app; it keeps working offline.</li>
     </ul>
+    <h3>Look</h3>
+    <ul>
+      <li><b>Theme</b>: Auto, Dark or Light — at the bottom of the Progress panel.</li>
+      <li><b>Desk mode</b> (clock button, or D): a big progress ring that keeps the screen on — for when your phone sits on the desk. Tap to pause or exit.</li>
+    </ul>
     <h3>Keyboard</h3>
-    <p class="keys">Space start/pause · ↑ ↓ ±1 min · S skip · R reset · 1 2 3 modes · H progress · L log time · N notes · E empire · F fullscreen · M mute</p>
+    <p class="keys">D desk mode · Space start/pause · ↑ ↓ ±1 min · S skip · R reset · 1 2 3 modes · H progress · L log time · N notes · E empire · F fullscreen · M mute</p>
     <div class="yr-row" style="justify-content:flex-end"><button class="btn go" id="guideClose">Got it</button></div>
   </div>`;
   document.body.appendChild(ov);
