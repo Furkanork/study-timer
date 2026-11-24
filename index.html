@@ -519,6 +519,7 @@
           <button data-tab="subjects">Subjects</button>
           <button data-tab="plan">Plan</button>
           <button data-tab="cards">Cards</button>
+          <button data-tab="friends">Friends</button>
           <button data-tab="year">Year</button>
         </div>
         <button class="round" id="closePanel" title="Close (Esc)"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
@@ -607,6 +608,7 @@
       <section id="tab-year" hidden></section>
       <section id="tab-plan" hidden></section>
       <section id="tab-cards" hidden></section>
+      <section id="tab-friends" hidden></section>
 
       <div class="sync" id="syncNote"></div>
       <div class="acct" id="acct" hidden></div>
@@ -1490,10 +1492,11 @@
   function renderPanel(soft) {
     store.set("tab", tab);
     document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
-    ["week", "history", "notes", "subjects", "year", "plan", "cards"].forEach(t => $("tab-" + t).hidden = t !== tab);
+    ["week", "history", "notes", "subjects", "year", "plan", "cards", "friends"].forEach(t => $("tab-" + t).hidden = t !== tab);
     if (tab === "year") { if (window.Extras) window.Extras.renderYear(); }
     else if (tab === "plan") { if (window.Tools) window.Tools.renderPlan(soft); }
     else if (tab === "cards") { if (window.Tools) window.Tools.renderCards(soft); }
+    else if (tab === "friends") { if (window.Social) window.Social.render(); }
     else if (tab === "week") renderWeek();
     else if (tab === "history") renderHistory();
     else if (tab === "notes") renderNotes();
@@ -2241,6 +2244,7 @@
 <script src="onboarding.js"></script>
 <script src="tools.js"></script>
 <script src="look.js"></script>
+<script src="social.js"></script>
 <script src="firebase-config.js"></script>
 <script type="module" src="firebase-sync.js"></script>
 </body>

@@ -322,6 +322,7 @@
       <li><b>Subjects</b>: add or remove subjects, set a weekly target, an exam date, skills, and the subject's <b>role in your empire</b>.</li>
       <li><b>Plan</b>: a weekly plan (fill it from your targets in one tap). The timer shows <b>Next up</b>, your empire's daily decrees follow it, and the <b>Exams</b> list tells you if you're on track.</li>
       <li><b>Cards</b>: flashcards that come back just before you'd forget them. Make them yourself or from a session note — write <i>question :: answer</i> and both sides fill in. Review time counts as study time.</li>
+      <li><b>Friends</b> (needs sign-in): turn it on with a nickname to get a friend code. Add friends by code to compare this week's hours and empires. Choose a friend as your <b>ally</b> — when they choose you too, you both get +100 gold for every week you both hit all your targets, and you can send each other reinforcements against raids.</li>
       <li><b>Year</b>: a 12-month heatmap and streaks, a <b>monthly recap card</b> to save or share, and <b>study reminders</b> you add to your phone's calendar.</li>
     </ul>
     <h3>Your empire (castle button)</h3>

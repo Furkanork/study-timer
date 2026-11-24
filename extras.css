@@ -136,3 +136,30 @@
 .ex-mid small { color: var(--muted); font-size: 12px; }
 .ex-v { font-size: 12.5px; margin-top: 5px; color: var(--muted); } .ex-v.ok { color: #6fcf97; } .ex-v.bad { color: #f19a83; }
 .plan-strip b { color: var(--text); }
+
+/* ---- friends ---- */
+.fr-empty h3 { font-size: 16px; margin-bottom: 6px; }
+.fr-empty input, #frAdd { flex: 1; min-width: 140px; background: rgba(0,0,0,.35); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font-size: 14px; }
+.help.bad { color: #f19a83; }
+.fr-code { display: flex; align-items: center; gap: 12px; background: rgba(255,255,255,.04); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; }
+.fr-code span { font-size: 12px; color: var(--muted); }
+.fr-code b { font-size: 22px; letter-spacing: .14em; flex: 1; font-variant-numeric: tabular-nums; }
+#frAdd { text-transform: uppercase; letter-spacing: .1em; }
+.fr-ally { margin-top: 12px; border: 1px solid rgba(187,134,252,.35); background: rgba(187,134,252,.07); border-radius: 14px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.fr-ally.on { border-color: rgba(242,201,76,.45); background: rgba(242,201,76,.07); }
+.fr-ally small { color: var(--muted); line-height: 1.45; }
+.fr-ally .btn { align-self: flex-start; }
+.fr-ally .btn:disabled { opacity: .5; }
+.fr-list { display: flex; flex-direction: column; }
+.fr-row { display: flex; gap: 12px; align-items: flex-start; padding: 11px 0; border-top: 1px solid var(--line); }
+.fr-row.me .fr-name b { color: var(--glow); }
+.fr-rank { width: 22px; text-align: center; font-weight: 800; color: var(--muted); padding-top: 2px; }
+.fr-mid { flex: 1; min-width: 0; font-size: 12.5px; color: var(--muted); }
+.fr-name { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 14px; color: var(--text); }
+.fr-name em.pers { font-style: normal; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; padding: 1px 6px; border-radius: 6px; background: rgba(242,201,76,.15); color: #e9c560; }
+.fr-top { margin-top: 3px; }
+.fr-emp { margin-top: 3px; display: flex; align-items: center; gap: 6px; }
+.fr-emp i { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.fr-h { text-align: right; } .fr-h b { font-size: 18px; display: block; }
+.fr-h span { display: flex; flex-direction: column; align-items: flex-end; }
+.fr-h .linkish, .help .linkish { background: none; border: 0; color: var(--faint); text-decoration: underline; cursor: pointer; font-size: 11.5px; padding: 1px 0; }

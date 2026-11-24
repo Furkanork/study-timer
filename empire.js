@@ -564,7 +564,11 @@
     for (const [sid, s] of subs) {
       const done = weekSecs(w, sid) / 3600;
       if (done >= s.target) { rep.tribute += 20; rep.lines.push({ sid, done, target: s.target, ok: true }); continue; }
-      const n = Math.max(0, Math.min(4, Math.ceil((1 - done / s.target) * 4)) - (tech("police") ? 1 : 0) - (wonderDone("listen") ? 1 : 0));
+      const aidLeft = (st.aid || {})[w] ? 2 - (rep.aidUsed || 0) : 0;
+      const raw = Math.max(0, Math.min(4, Math.ceil((1 - done / s.target) * 4)) - (tech("police") ? 1 : 0) - (wonderDone("listen") ? 1 : 0));
+      const blocked = Math.min(aidLeft, raw);
+      rep.aidUsed = (rep.aidUsed || 0) + blocked;
+      const n = raw - blocked;
       const { lost, repelled } = seizeBorder(n, null, w);
       const shielded = repelled.length > 0;
       rep.lines.push({ sid, done, target: s.target, ok: false, lost, shielded, repelled: repelled.map(p => map.P[p].name) });
@@ -1956,5 +1960,16 @@
       provinces: b ? cnt(b) : ownedList().length, gained: a && b ? cnt(b) - cnt(a) : null,
       wars: Object.values(st.wars || {}).filter(w => w.resolved && w.exam >= from && w.exam <= to).map(w => ({ won: w.won, enemy: st.rivals[w.enemy - 1].name })) };
   }
-  window.Empire = { open, close, applyRemote, summary, ROLES, guessKind, KINDS, toggle: () => (isOpen() ? close() : open()), _debug: { map: () => map, view, state: () => st } };
+  // ---------- hooks for friends & alliances (social.js) ----------
+  function publicInfo() {
+    if (!st) return null;
+    return { name: st.name, color: st.color, provinces: ownedList().length, era: ERAS[eraIdx()].name, rank: rankOf(ownedList().length), streak: st.decrees ? streak() : 0 };
+  }
+  function grant(gold, text) { if (!st) return false; st.gold += gold; logEvent(text, "good"); save(); if (isOpen()) refresh(); return true; }
+  function spend(gold) { if (!st || st.gold < gold) return false; st.gold -= gold; save(); if (isOpen()) refresh(); return true; }
+  function receiveAid(week, from) {
+    if (!st || (st.aid || {})[week]) return false;
+    (st.aid = st.aid || {})[week] = from; logEvent(`${from} sent reinforcements — this week's raids take 2 provinces fewer`, "peace"); save(); return true;
+  }
+  window.Empire = { open, close, applyRemote, summary, publicInfo, grant, spend, receiveAid, gold: () => st ? st.gold : 0, ROLES, guessKind, KINDS, toggle: () => (isOpen() ? close() : open()), _debug: { map: () => map, view, state: () => st } };
 })();

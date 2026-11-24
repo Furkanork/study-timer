@@ -59,6 +59,9 @@ async function start() {
     };
     window.claude = { use: async what => what === "db" ? db : { id: async () => user.uid } };
     ST.startSync();
+    // shared Firestore access for the friends feature (social.js)
+    window.FB = { F, fs, uid: user.uid };
+    window.dispatchEvent(new Event("fb:ready"));
   });
 
   function showSignedOut(err) {
