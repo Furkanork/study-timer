@@ -339,6 +339,7 @@
     <h3>Look</h3>
     <ul>
       <li><b>Theme</b>: Auto, Dark or Light — at the bottom of the Progress panel.</li>
+      <li><b>Lock-screen timer</b>: while the timer runs, your phone's lock screen and notification shade show the time left, your subject and a progress bar, with pause and skip buttons — like a music player. It plays a silent sound to do this. Switch it off at the bottom of the Progress panel.</li>
       <li><b>Desk mode</b> (clock button, or D): a big progress ring that keeps the screen on — for when your phone sits on the desk. Tap to pause or exit.</li>
     </ul>
     <h3>Keyboard</h3>

@@ -2226,6 +2226,7 @@
     createSubject, importMerge, openPanel, closePanel, pushDoc, logStudy, examInfo, setSubject,
     timerState: () => ({ remaining: endAt ? Math.max(0, (endAt - Date.now()) / 1000) : remaining, total, running: !!endAt, mode }),
     toggleTimer: () => { endAt ? pause() : start(); wake(); },
+    skipTimer: () => { skip(); wake(); },
     getNotes: () => { const o = {}; for (const src of [notes, otherNotes]) for (const k in src) (o[k] = o[k] || []).push(...(src[k] || [])); return o; },
     currentSubject: () => currentSubj, todaySecs: sid => dayFocus(today(), sid), subjTotal,
     deviceHistories: () => Object.assign({ ["dev-" + deviceId]: history }, othersBy),
@@ -2245,6 +2246,7 @@
 <script src="tools.js"></script>
 <script src="look.js"></script>
 <script src="social.js"></script>
+<script src="lockscreen.js"></script>
 <script src="firebase-config.js"></script>
 <script type="module" src="firebase-sync.js"></script>
 </body>
